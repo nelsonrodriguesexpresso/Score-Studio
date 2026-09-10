@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from datetime import datetime
 import json
@@ -12,6 +13,7 @@ import uuid
 
 from analyzer import analyze_audio
 from pdf_export import create_pdf
+from youtube_source import download_youtube_audio, cleanup_youtube_temp, YoutubeSourceError
 
 BASE = Path(__file__).resolve().parent
 UPLOADS = BASE / "uploads"
@@ -53,6 +55,10 @@ def safe_filename(value: str) -> str:
     return value[:100] or "Musica"
 
 
+def valid_instrument(instrument: str) -> bool:
+    return instrument in {"bass5", "guitar", "piano"}
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse(
@@ -83,7 +89,7 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
                 {"ok": False, "error": "Formato não suportado. Usa MP3, WAV, M4A, FLAC ou OGG."},
                 status_code=400,
             )
-        if instrument not in {"bass5", "guitar", "piano"}:
+        if not valid_instrument(instrument):
             return JSONResponse({"ok": False, "error": "Instrumento inválido."}, status_code=400)
 
         content = await file.read()
@@ -94,10 +100,11 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
 
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
-        result = analyze_audio(temp_path, instrument)
+        result = await run_in_threadpool(analyze_audio, temp_path, instrument)
         result.update({
             "ok": True,
             "title": Path(filename).stem,
+            "source": "file",
             "version": VERSION,
         })
         return JSONResponse(content=json_safe(result))
@@ -108,7 +115,6 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
                 "ok": False,
                 "error": "A análise encontrou um problema.",
                 "detail": f"{type(exc).__name__}: {exc}",
-                "log": "Foi criado o ficheiro score_error.log na pasta do Score.",
             },
             status_code=500,
         )
@@ -118,6 +124,45 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
                 temp_path.unlink()
             except Exception:
                 pass
+
+
+@app.post("/api/analyze-youtube")
+async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5")):
+    token = None
+    try:
+        if not valid_instrument(instrument):
+            return JSONResponse({"ok": False, "error": "Instrumento inválido."}, status_code=400)
+
+        audio_path, title, source_duration, token = await run_in_threadpool(
+            download_youtube_audio, url, UPLOADS
+        )
+        result = await run_in_threadpool(analyze_audio, audio_path, instrument)
+        result.update({
+            "ok": True,
+            "title": title,
+            "source": "youtube",
+            "source_duration": source_duration,
+            "version": VERSION,
+        })
+        return JSONResponse(content=json_safe(result))
+    except YoutubeSourceError as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc)},
+            status_code=400,
+        )
+    except Exception as exc:
+        log_error()
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Não foi possível analisar este link do YouTube.",
+                "detail": f"{type(exc).__name__}: {exc}",
+            },
+            status_code=500,
+        )
+    finally:
+        if token:
+            cleanup_youtube_temp(UPLOADS, token)
 
 
 @app.post("/api/export")
