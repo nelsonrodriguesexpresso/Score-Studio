@@ -6,3 +6,4 @@ librosa>=0.10.2
 soundfile>=0.12
 numpy>=1.26
 reportlab>=4.2
+yt-dlp>=2026.8.27
