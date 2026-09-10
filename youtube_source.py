@@ -2,6 +2,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs, quote
 from urllib.request import Request, urlopen
 import json
+import time
 import uuid
 
 import yt_dlp
@@ -64,8 +65,9 @@ def _base_options():
         "no_warnings": True,
         "noplaylist": True,
         "socket_timeout": 25,
-        "retries": 2,
-        "extractor_retries": 2,
+        "retries": 1,
+        "extractor_retries": 1,
+        "fragment_retries": 1,
     }
 
 
@@ -120,7 +122,6 @@ def get_youtube_info(url: str):
             "preview_source": "oembed",
         })
     except Exception:
-        # Mesmo sem oEmbed, o ID permite mostrar uma miniatura válida.
         pass
     return preview
 
@@ -139,6 +140,37 @@ def _is_bot_block(message: str) -> bool:
     )
 
 
+def _attempt_profiles(output_template, match_filter):
+    """Perfis de compatibilidade, sem cookies, proxy ou credenciais pessoais."""
+    return [
+        {
+            "format": "bestaudio/best",
+            "outtmpl": output_template,
+            "match_filter": match_filter,
+        },
+        {
+            "format": "bestaudio[ext=m4a]/bestaudio/best",
+            "outtmpl": output_template,
+            "match_filter": match_filter,
+            "force_ipv4": True,
+        },
+        {
+            "format": "bestaudio[ext=webm]/bestaudio/best",
+            "outtmpl": output_template,
+            "match_filter": match_filter,
+            "force_ipv4": True,
+        },
+    ]
+
+
+def _clear_partial_downloads(directory: Path, token: str):
+    for path in directory.glob(f"{token}.*"):
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+
 def download_youtube_audio(url: str, directory: Path):
     url = validate_youtube_url(url)
     directory.mkdir(parents=True, exist_ok=True)
@@ -151,49 +183,60 @@ def download_youtube_audio(url: str, directory: Path):
             return "O vídeo excede o limite de 10 minutos."
         return None
 
-    options = _base_options()
-    options.update({
-        "format": "bestaudio/best",
-        "outtmpl": output_template,
-        "match_filter": match_filter,
-        "postprocessors": [{
+    last_error = None
+    saw_bot_block = False
+
+    for attempt_no, profile in enumerate(_attempt_profiles(output_template, match_filter), start=1):
+        if attempt_no > 1:
+            _clear_partial_downloads(directory, token)
+            time.sleep(1.2 * (attempt_no - 1))
+
+        options = _base_options()
+        options.update(profile)
+        options["postprocessors"] = [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "wav",
             "preferredquality": "192",
-        }],
-    })
+        }]
 
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except yt_dlp.utils.DownloadError as exc:
-        message = str(exc)
-        if "10 minutos" in message:
-            raise YoutubeSourceError("O vídeo excede o limite de 10 minutos.", "duration_limit") from exc
-        if _is_bot_block(message):
-            raise YoutubeSourceError(
-                "O YouTube bloqueou o acesso automático ao áudio a partir deste servidor. "
-                "Podes continuar imediatamente carregando o ficheiro MP3, WAV, M4A, FLAC ou OGG.",
-                "youtube_bot_block",
-            ) from exc
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=True)
+            meta = _normalize_info(info)
+
+            wav_path = directory / f"{token}.wav"
+            if not wav_path.exists():
+                candidates = sorted(directory.glob(f"{token}.*"))
+                if not candidates:
+                    raise yt_dlp.utils.DownloadError("ficheiro de áudio não criado")
+                wav_path = candidates[0]
+
+            meta["download_attempt"] = attempt_no
+            return wav_path, meta, token
+
+        except yt_dlp.utils.DownloadError as exc:
+            message = str(exc)
+            last_error = exc
+            if "10 minutos" in message:
+                raise YoutubeSourceError("O vídeo excede o limite de 10 minutos.", "duration_limit") from exc
+            if _is_bot_block(message):
+                saw_bot_block = True
+            continue
+
+    _clear_partial_downloads(directory, token)
+
+    if saw_bot_block:
         raise YoutubeSourceError(
-            "O áudio deste vídeo não ficou disponível para análise automática. "
-            "Podes continuar carregando o ficheiro de áudio.",
-            "youtube_unavailable",
-        ) from exc
+            "O Score Studio tentou obter o áudio 3 vezes, mas o YouTube bloqueou o acesso automático a partir deste servidor. "
+            "Podes continuar imediatamente carregando o ficheiro MP3, WAV, M4A, FLAC ou OGG.",
+            "youtube_bot_block",
+        ) from last_error
 
-    meta = _normalize_info(info)
-    wav_path = directory / f"{token}.wav"
-    if not wav_path.exists():
-        candidates = sorted(directory.glob(f"{token}.*"))
-        if not candidates:
-            raise YoutubeSourceError(
-                "O áudio do vídeo não ficou disponível para análise. "
-                "Podes continuar carregando o ficheiro de áudio.",
-                "youtube_unavailable",
-            )
-        wav_path = candidates[0]
-    return wav_path, meta, token
+    raise YoutubeSourceError(
+        "O Score Studio tentou obter o áudio 3 vezes, mas este vídeo não ficou disponível para análise automática. "
+        "Podes continuar carregando o ficheiro de áudio.",
+        "youtube_unavailable",
+    ) from last_error
 
 
 def cleanup_youtube_temp(directory: Path, token: str):
