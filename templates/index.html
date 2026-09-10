@@ -3,34 +3,58 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#091018">
-  <title>Score Studio</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="/static/youtube.css">
+  <meta name="theme-color" content="#071019">
+  <meta name="description" content="Score Studio transforma áudio em pauta, TAB, acordes e estrutura musical com revisão assistida.">
+  <title>Score Studio | Da música para a pauta</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ version }}">
+  <link rel="stylesheet" href="/static/youtube.css?v={{ version }}">
 </head>
 <body>
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand">
+    <a class="brand" href="#top" aria-label="Score Studio">
       <div class="brand-mark">S</div>
-      <div class="brand-copy"><strong>Score Studio</strong><span>Análise e criação de partituras</span></div>
-    </div>
-    <div class="top-actions"><span class="version">v{{ version }}</span><span class="engine"><i></i> Motor online</span></div>
+      <div class="brand-copy"><strong>Score Studio</strong><span>Transcrição musical assistida</span></div>
+    </a>
+    <nav class="top-nav" aria-label="Navegação"><a href="#create">Criar pauta</a><a href="#how">Como funciona</a><a href="#privacy">Privacidade</a></nav>
+    <div class="top-actions"><span class="version">v{{ version }}</span><span class="engine"><i></i> Online</span></div>
   </header>
 
-  <main class="workspace">
-    <section class="hero">
-      <div><div class="eyebrow">TRANSCRIÇÃO ASSISTIDA</div><h1>Da música para uma pauta organizada.</h1><p>Carrega um ficheiro de áudio ou cola um link do YouTube. O Score Studio analisa BPM, tonalidade, acordes e estrutura, permite rever o resultado e exporta a pauta ou a partitura de acordes em PDF.</p></div>
-      <div class="hero-badges"><span>Baixo</span><span>Guitarra</span><span>Piano / Teclado</span><span>YouTube</span><span>PDF A4</span></div>
+  <main id="top" class="workspace">
+    <section class="landing-hero">
+      <div class="hero-copy">
+        <div class="eyebrow">SCORE STUDIO 6</div>
+        <h1>Ouve a música. Organiza a pauta. <span>Ensaia melhor.</span></h1>
+        <p>Carrega áudio ou usa um link do YouTube. O Score Studio separa o sinal por focos instrumentais, estima BPM e tonalidade, deteta acordes e notas, organiza as secções e deixa-te corrigir tudo antes do PDF.</p>
+        <div class="hero-actions"><a class="btn btn-primary btn-hero" href="#create">Criar pauta</a><a class="btn btn-quiet btn-hero" href="#how">Ver como funciona</a></div>
+        <div class="hero-trust"><span>✓ Sem conta</span><span>✓ Ficheiros temporários</span><span>✓ PDF A4</span></div>
+      </div>
+      <div class="hero-stage" aria-hidden="true">
+        <div class="score-preview">
+          <div class="score-preview-top"><span>REFRÃO</span><b>♬</b></div>
+          <div class="mock-bars"><i>G</i><i>D</i><i>Em</i><i>C</i></div>
+          <div class="mock-staff"><span></span><span></span><span></span><span></span><span></span><b>●</b><b>●</b><b>●</b><b>●</b></div>
+          <div class="mock-tab">TAB&nbsp;&nbsp; 3 ─ 5 ─ 7 ─ 5</div>
+        </div>
+        <div class="floating-chip chip-a">89 BPM</div><div class="floating-chip chip-b">Tom Em</div><div class="floating-chip chip-c">Baixo focado</div>
+      </div>
+    </section>
+
+    <section id="how" class="feature-strip">
+      <article><b>01</b><div><strong>Foco instrumental</strong><span>Baixo, percussão, voz/faixa média e acompanhamento são separados de forma assistida.</span></div></article>
+      <article><b>02</b><div><strong>Editor musical</strong><span>Corrige acordes e notas compasso a compasso antes de exportar.</span></div></article>
+      <article><b>03</b><div><strong>Modo ensaio</strong><span>Reproduz o ficheiro carregado e acompanha o compasso atual.</span></div></article>
+      <article><b>04</b><div><strong>4 tipos de PDF</strong><span>Pauta, TAB, acordes ou apenas estrutura.</span></div></article>
     </section>
 
     <nav class="stepper" aria-label="Fluxo de trabalho">
       <button class="step active" data-target="analysisCard"><b>1</b><span>Analisar</span></button>
-      <button class="step" data-target="reviewCard"><b>2</b><span>Rever</span></button>
+      <button class="step" data-target="reviewCard"><b>2</b><span>Rever e ensaiar</span></button>
       <button class="step" data-target="exportCard"><b>3</b><span>Exportar</span></button>
     </nav>
 
-    <section id="analysisCard" class="panel">
+    <section id="create" class="anchor-target"></section>
+    <section id="analysisCard" class="panel panel-focus">
       <div class="panel-heading"><div><span class="kicker">PASSO 1</span><h2>Nova análise</h2><p>Escolhe o instrumento e a origem da música.</p></div><span class="privacy-badge">Processamento temporário</span></div>
 
       <div class="source-switch" role="tablist" aria-label="Origem da música">
@@ -39,14 +63,17 @@
       </div>
 
       <div class="analysis-grid">
-        <label class="field"><span>Instrumento</span><select id="instrument"><option value="bass5">Baixo</option><option value="guitar">Guitarra</option><option value="piano">Piano / Teclado</option></select></label>
+        <div class="analysis-options">
+          <label class="field"><span>Instrumento</span><select id="instrument"><option value="bass5">Baixo</option><option value="guitar">Guitarra</option><option value="piano">Piano / Teclado</option></select></label>
+          <div class="focus-info"><span class="focus-dot"></span><div><strong>Análise focada no instrumento</strong><small>O motor usa uma separação espectral leve antes de estimar as notas.</small></div></div>
+        </div>
 
         <div>
           <div id="fileSourcePane" class="source-pane">
             <div id="dropzone" class="dropzone" tabindex="0">
               <input id="audio" type="file" accept="audio/*" hidden>
               <div class="upload-icon">♪</div>
-              <div class="upload-copy"><strong id="fileTitle">Arrasta uma música para aqui</strong><span id="fname">ou clica para escolher MP3, WAV, M4A, FLAC ou OGG</span></div>
+              <div class="upload-copy"><strong id="fileTitle">Arrasta uma música para aqui</strong><span id="fname">ou clica para escolher MP3, WAV, M4A, FLAC ou OGG · máximo 50 MB</span></div>
               <button id="chooseFile" type="button" class="btn btn-quiet">Escolher ficheiro</button>
             </div>
           </div>
@@ -56,49 +83,70 @@
               <div class="youtube-icon">▶</div>
               <div class="youtube-content">
                 <strong>Link do YouTube</strong>
-                <input id="youtubeUrl" class="youtube-url" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
-                <span class="youtube-help">O áudio é obtido apenas para processamento temporário. Alguns vídeos privados, restritos ou bloqueados pelo YouTube podem não estar disponíveis.</span>
+                <div class="youtube-input-row"><input id="youtubeUrl" class="youtube-url" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off"><button id="youtubePreviewBtn" type="button" class="btn btn-quiet">Pré-visualizar</button></div>
+                <span class="youtube-help">Vídeos até 10 minutos. Conteúdos privados, restritos ou bloqueados pelo YouTube podem falhar.</span>
               </div>
             </div>
+            <div id="youtubePreview" class="youtube-preview hidden"><img id="youtubeThumb" alt="Miniatura do vídeo"><div><strong id="youtubeTitle">-</strong><span id="youtubeMeta">-</span></div></div>
           </div>
         </div>
       </div>
 
       <div id="audioPreview" class="audio-preview hidden"><div class="audio-meta"><strong id="audioName"></strong><span id="audioSize"></span></div><audio id="player" controls preload="metadata"></audio></div>
-      <div class="analysis-action"><div class="local-note">A música é usada apenas durante a análise. Os ficheiros temporários são eliminados após o processamento.</div><button id="go" class="btn btn-primary btn-large">Analisar música</button></div>
-      <div id="progressBox" class="progress-box hidden" aria-live="polite"><div class="progress-top"><strong id="progressText">A preparar a análise…</strong><span id="progressPercent">0%</span></div><div class="progress-track"><div id="progressBar"></div></div><div class="progress-stages"><span>BPM</span><span>Tonalidade</span><span>Acordes</span><span>Estrutura</span></div></div>
+
+      <label class="rights-check"><input id="rightsConfirmed" type="checkbox"><span>Confirmo que tenho autorização para analisar este conteúdo e compreendo que a transcrição automática deve ser revista.</span></label>
+      <div class="analysis-action"><div class="local-note">O áudio é usado apenas durante a análise e os ficheiros temporários são eliminados. Limite público: 6 análises por 15 minutos por ligação.</div><button id="go" class="btn btn-primary btn-large">Analisar música</button></div>
+      <div id="progressBox" class="progress-box hidden" aria-live="polite"><div class="progress-top"><strong id="progressText">A preparar a análise…</strong><span id="progressPercent">0%</span></div><div class="progress-track"><div id="progressBar"></div></div><div class="progress-stages"><span>Separar</span><span>BPM</span><span>Notas</span><span>Acordes</span><span>Estrutura</span></div></div>
       <div id="status" class="status hidden"></div>
     </section>
 
     <section id="reviewCard" class="panel hidden">
-      <div class="panel-heading"><div><span class="kicker">PASSO 2</span><h2>Rever análise</h2><p>Corrige o que for necessário antes de exportar.</p></div><div class="quality"><span>Sinal de análise</span><strong id="signal">-</strong></div></div>
+      <div class="panel-heading"><div><span class="kicker">PASSO 2</span><h2>Rever análise</h2><p>Corrige os dados, acordes e notas. Nada é guardado como biblioteca.</p></div><div class="quality"><span>Sinal de análise</span><strong id="signal">-</strong></div></div>
       <div class="metadata-grid">
         <label class="field field-wide"><span>Título</span><input id="title" type="text"></label>
+        <label class="field field-wide"><span>Artista</span><input id="artistInput" type="text" placeholder="Opcional"></label>
         <label class="field"><span>BPM</span><input id="bpmInput" type="number" min="30" max="300"></label>
         <label class="field"><span>Tom</span><input id="keyInput" type="text"></label>
         <label class="field"><span>Compasso</span><select id="meterInput"><option>4/4</option><option>3/4</option><option>6/8</option><option>2/4</option></select></label>
       </div>
-      <div class="summary-grid"><article><span>Duração</span><strong id="durationValue">-</strong></article><article><span>Compassos analisados</span><strong id="barsValue">-</strong></article><article><span>Instrumento</span><strong id="instrumentValue">-</strong></article></div>
-      <details class="technical"><summary>Informação técnica da análise</summary><div class="technical-body"><div><span>Notas predominantes</span><div id="notes" class="note-tags"></div></div><p>A deteção automática serve de base de trabalho. A estrutura e os acordes continuam editáveis.</p></div></details>
-      <div class="section-toolbar"><div><span class="kicker">ESTRUTURA</span><h3>Secções e acordes</h3></div><button id="addSection" class="btn btn-secondary">+ Adicionar secção</button></div>
+      <div class="summary-grid"><article><span>Duração</span><strong id="durationValue">-</strong></article><article><span>Compassos analisados</span><strong id="barsValue">-</strong></article><article><span>Instrumento</span><strong id="instrumentValue">-</strong></article><article><span>Foco</span><strong id="focusValue">-</strong></article></div>
+
+      <details class="technical"><summary>Informação técnica da análise</summary><div class="technical-body"><div><span>Notas predominantes</span><div id="notes" class="note-tags"></div></div><div class="tech-separation"><span>Separação do sinal</span><strong id="separationMode">-</strong></div><p>A separação é assistida e leve, pensada para manter o serviço público estável. Não equivale a stems de estúdio nem garante transcrição nota por nota perfeita.</p></div></details>
+
+      <section id="rehearsalPanel" class="rehearsal-panel">
+        <div class="rehearsal-head"><div><span class="kicker">MODO ENSAIO</span><h3>Reprodução sincronizada</h3></div><div class="now-playing"><span>Compasso</span><strong id="syncBar">-</strong><b id="syncChord">-</b></div></div>
+        <p id="syncHelp">Reproduz o ficheiro carregado. O compasso estimado fica realçado automaticamente.</p>
+        <div id="youtubeRehearsal" class="youtube-rehearsal hidden"></div>
+        <div id="syncBars" class="sync-bars"></div>
+      </section>
+
+      <div class="section-toolbar"><div><span class="kicker">EDITOR</span><h3>Secções, acordes e notas</h3><p>Notas no formato E2, B2, G3. Podes escrever até quatro por compasso.</p></div><button id="addSection" class="btn btn-secondary">+ Adicionar secção</button></div>
       <div id="sections" class="sections-list"></div>
       <div class="review-footer"><span>As alterações feitas aqui são usadas nos PDFs.</span><button id="goExport" class="btn btn-primary">Continuar para exportação</button></div>
     </section>
 
     <section id="exportCard" class="panel hidden">
-      <div class="panel-heading"><div><span class="kicker">PASSO 3</span><h2>Exportar documentos</h2><p>Gera ficheiros A4 prontos para imprimir ou guardar.</p></div></div>
-      <div class="export-grid">
-        <article class="export-card featured"><div class="export-icon">𝄢</div><div><span class="export-label">PAUTA DO INSTRUMENTO</span><h3>Pauta + acordes</h3><p>Documento adaptado ao instrumento escolhido, com acordes e organização por secções. Inclui TAB quando aplicável.</p></div><button id="pdfScore" class="btn btn-primary">Exportar PDF Pauta</button></article>
-        <article class="export-card"><div class="export-icon">♬</div><div><span class="export-label">PARTITURA DE ACORDES</span><h3>Estrutura harmónica</h3><p>Secções, repetições, números de compasso e acordes num formato mais limpo.</p></div><button id="pdfChart" class="btn btn-secondary">Exportar PDF Partitura</button></article>
+      <div class="panel-heading"><div><span class="kicker">PASSO 3</span><h2>Escolher resultado</h2><p>Cria apenas o documento de que precisas.</p></div><label class="cover-toggle"><input id="pdfCover" type="checkbox" checked><span>Adicionar capa profissional</span></label></div>
+      <div class="export-grid export-grid-four">
+        <article class="export-card featured"><div class="export-icon">𝄢</div><div><span class="export-label">PAUTA COMPLETA</span><h3>Pauta + acordes + TAB</h3><p>Notas editadas, acordes, números de compasso e TAB quando aplicável.</p></div><button id="pdfScore" class="btn btn-primary">Exportar Pauta</button></article>
+        <article id="tabExportCard" class="export-card"><div class="export-icon">≡</div><div><span class="export-label">TAB</span><h3>Somente tablatura</h3><p>Versão compacta para Baixo ou Guitarra.</p></div><button id="pdfTab" class="btn btn-secondary">Exportar TAB</button></article>
+        <article class="export-card"><div class="export-icon">♬</div><div><span class="export-label">ACORDES</span><h3>Partitura harmónica</h3><p>Secções, repetições e acordes em formato limpo.</p></div><button id="pdfChart" class="btn btn-secondary">Exportar Acordes</button></article>
+        <article class="export-card"><div class="export-icon">☷</div><div><span class="export-label">ESTRUTURA</span><h3>Mapa da música</h3><p>Intro, estrofes, refrões, ponte, final e repetições.</p></div><button id="pdfStructure" class="btn btn-secondary">Exportar Estrutura</button></article>
       </div>
       <div id="exportStatus" class="status hidden"></div>
     </section>
 
-    <footer class="footer"><span>Score Studio v{{ version }}</span><span>Análise musical assistida</span></footer>
+    <section id="privacy" class="public-info">
+      <article><span class="kicker">PRIVACIDADE</span><h3>Sem arquivo de músicas</h3><p>O Score Studio não cria uma biblioteca pessoal. O áudio temporário é apagado depois do processamento e os PDFs temporários são eliminados depois do download.</p></article>
+      <article><span class="kicker">UTILIZAÇÃO RESPONSÁVEL</span><h3>Conteúdo autorizado</h3><p>Usa apenas gravações que possas legalmente processar. A análise é uma ferramenta de apoio musical e pode conter erros de notas, acordes, ritmo ou estrutura.</p></article>
+      <article><span class="kicker">SERVIÇO PÚBLICO</span><h3>Proteção contra abuso</h3><p>Existem limites de tamanho, duração e frequência para manter o serviço disponível para todos.</p></article>
+    </section>
+
+    <footer class="footer"><span>Score Studio v{{ version }}</span><span>Transcrição musical assistida · ficheiros temporários</span></footer>
   </main>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="/static/app.js"></script>
-<script src="/static/youtube.js"></script>
+<script src="/static/app.js?v={{ version }}"></script>
+<script src="/static/youtube.js?v={{ version }}"></script>
 </body>
 </html>
