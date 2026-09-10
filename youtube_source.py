@@ -1,5 +1,7 @@
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs, quote
+from urllib.request import Request, urlopen
+import json
 import uuid
 
 import yt_dlp
@@ -15,20 +17,45 @@ MAX_DURATION_SECONDS = 10 * 60
 
 
 class YoutubeSourceError(Exception):
-    pass
+    def __init__(self, message: str, code: str = "youtube_error"):
+        super().__init__(message)
+        self.code = code
 
 
 def validate_youtube_url(url: str) -> str:
     value = (url or "").strip()
     if not value:
-        raise YoutubeSourceError("Indica um link do YouTube.")
+        raise YoutubeSourceError("Indica um link do YouTube.", "invalid_url")
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"}:
-        raise YoutubeSourceError("O link do YouTube não é válido.")
+        raise YoutubeSourceError("O link do YouTube não é válido.", "invalid_url")
     host = (parsed.hostname or "").lower()
     if host not in ALLOWED_HOSTS:
-        raise YoutubeSourceError("Neste campo só são aceites links do YouTube.")
+        raise YoutubeSourceError("Neste campo só são aceites links do YouTube.", "invalid_url")
     return value
+
+
+def extract_video_id(url: str) -> str:
+    value = validate_youtube_url(url)
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+
+    if host == "youtu.be":
+        video_id = parsed.path.strip("/").split("/")[0]
+    else:
+        query_id = parse_qs(parsed.query).get("v", [""])[0]
+        if query_id:
+            video_id = query_id
+        else:
+            parts = [part for part in parsed.path.split("/") if part]
+            video_id = ""
+            if len(parts) >= 2 and parts[0] in {"shorts", "embed", "live"}:
+                video_id = parts[1]
+
+    video_id = "".join(ch for ch in video_id if ch.isalnum() or ch in "-_")
+    if len(video_id) < 6:
+        raise YoutubeSourceError("Não foi possível identificar o vídeo neste link.", "invalid_url")
+    return video_id
 
 
 def _base_options():
@@ -46,7 +73,7 @@ def _normalize_info(info):
     info = info or {}
     duration = float(info.get("duration") or 0)
     if duration and duration > MAX_DURATION_SECONDS:
-        raise YoutubeSourceError("O vídeo excede o limite de 10 minutos.")
+        raise YoutubeSourceError("O vídeo excede o limite de 10 minutos.", "duration_limit")
     return {
         "title": str(info.get("title") or "Música do YouTube").strip(),
         "duration": duration,
@@ -57,18 +84,59 @@ def _normalize_info(info):
     }
 
 
+def _fallback_preview(url: str):
+    video_id = extract_video_id(url)
+    return {
+        "title": "Vídeo do YouTube",
+        "duration": 0,
+        "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+        "uploader": "",
+        "video_id": video_id,
+        "webpage_url": f"https://www.youtube.com/watch?v={video_id}",
+        "preview_source": "link",
+    }
+
+
 def get_youtube_info(url: str):
+    """Obtém uma pré-visualização sem tentar descarregar o áudio."""
     url = validate_youtube_url(url)
-    options = _base_options()
-    options.update({"skip_download": True})
+    preview = _fallback_preview(url)
+    canonical = preview["webpage_url"]
+    endpoint = f"https://www.youtube.com/oembed?url={quote(canonical, safe='')}&format=json"
+    request = Request(
+        endpoint,
+        headers={
+            "User-Agent": "ScoreStudio/6.0 (+https://scorestudiomusic.up.railway.app)",
+            "Accept": "application/json",
+        },
+    )
     try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except yt_dlp.utils.DownloadError as exc:
-        raise YoutubeSourceError(
-            "Não foi possível ler este vídeo. Pode estar privado, restrito ou bloqueado pelo YouTube."
-        ) from exc
-    return _normalize_info(info)
+        with urlopen(request, timeout=8) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        preview.update({
+            "title": str(data.get("title") or preview["title"]).strip(),
+            "thumbnail": str(data.get("thumbnail_url") or preview["thumbnail"]).strip(),
+            "uploader": str(data.get("author_name") or "").strip(),
+            "preview_source": "oembed",
+        })
+    except Exception:
+        # Mesmo sem oEmbed, o ID permite mostrar uma miniatura válida.
+        pass
+    return preview
+
+
+def _is_bot_block(message: str) -> bool:
+    value = message.lower()
+    return any(
+        marker in value
+        for marker in (
+            "confirm you're not a bot",
+            "confirm you’re not a bot",
+            "sign in to confirm",
+            "cookies-from-browser",
+            "use --cookies",
+        )
+    )
 
 
 def download_youtube_audio(url: str, directory: Path):
@@ -101,10 +169,17 @@ def download_youtube_audio(url: str, directory: Path):
     except yt_dlp.utils.DownloadError as exc:
         message = str(exc)
         if "10 minutos" in message:
-            raise YoutubeSourceError("O vídeo excede o limite de 10 minutos.") from exc
+            raise YoutubeSourceError("O vídeo excede o limite de 10 minutos.", "duration_limit") from exc
+        if _is_bot_block(message):
+            raise YoutubeSourceError(
+                "O YouTube bloqueou o acesso automático ao áudio a partir deste servidor. "
+                "Podes continuar imediatamente carregando o ficheiro MP3, WAV, M4A, FLAC ou OGG.",
+                "youtube_bot_block",
+            ) from exc
         raise YoutubeSourceError(
-            "Não foi possível obter o áudio deste vídeo. O YouTube pode ter bloqueado o acesso, "
-            "o vídeo pode ser privado/restrito ou o link pode não estar disponível."
+            "O áudio deste vídeo não ficou disponível para análise automática. "
+            "Podes continuar carregando o ficheiro de áudio.",
+            "youtube_unavailable",
         ) from exc
 
     meta = _normalize_info(info)
@@ -112,7 +187,11 @@ def download_youtube_audio(url: str, directory: Path):
     if not wav_path.exists():
         candidates = sorted(directory.glob(f"{token}.*"))
         if not candidates:
-            raise YoutubeSourceError("O áudio do vídeo não ficou disponível para análise.")
+            raise YoutubeSourceError(
+                "O áudio do vídeo não ficou disponível para análise. "
+                "Podes continuar carregando o ficheiro de áudio.",
+                "youtube_unavailable",
+            )
         wav_path = candidates[0]
     return wav_path, meta, token
 
