@@ -68,6 +68,7 @@ def _base_options():
         "retries": 1,
         "extractor_retries": 1,
         "fragment_retries": 1,
+        "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
     }
 
 
@@ -100,7 +101,7 @@ def _fallback_preview(url: str):
 
 
 def get_youtube_info(url: str):
-    """Obtém uma pré-visualização sem tentar descarregar o áudio."""
+    """Obtém uma pré-visualização sem descarregar o áudio."""
     url = validate_youtube_url(url)
     preview = _fallback_preview(url)
     canonical = preview["webpage_url"]
@@ -136,29 +137,29 @@ def _is_bot_block(message: str) -> bool:
             "sign in to confirm",
             "cookies-from-browser",
             "use --cookies",
+            "login_required",
         )
     )
 
 
 def _attempt_profiles(output_template, match_filter):
-    """Perfis de compatibilidade, sem cookies, proxy ou credenciais pessoais."""
+    """Tentativas com clientes YouTube diferentes e runtime JS suportado."""
+    common = {
+        "format": "bestaudio/best",
+        "outtmpl": output_template,
+        "match_filter": match_filter,
+    }
     return [
+        dict(common),
         {
-            "format": "bestaudio/best",
-            "outtmpl": output_template,
-            "match_filter": match_filter,
+            **common,
+            "force_ipv4": True,
+            "extractor_args": {"youtube": {"player_client": ["web_embedded"]}},
         },
         {
-            "format": "bestaudio[ext=m4a]/bestaudio/best",
-            "outtmpl": output_template,
-            "match_filter": match_filter,
+            **common,
             "force_ipv4": True,
-        },
-        {
-            "format": "bestaudio[ext=webm]/bestaudio/best",
-            "outtmpl": output_template,
-            "match_filter": match_filter,
-            "force_ipv4": True,
+            "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
         },
     ]
 
@@ -189,7 +190,7 @@ def download_youtube_audio(url: str, directory: Path):
     for attempt_no, profile in enumerate(_attempt_profiles(output_template, match_filter), start=1):
         if attempt_no > 1:
             _clear_partial_downloads(directory, token)
-            time.sleep(1.2 * (attempt_no - 1))
+            time.sleep(1.0 * (attempt_no - 1))
 
         options = _base_options()
         options.update(profile)
@@ -227,13 +228,13 @@ def download_youtube_audio(url: str, directory: Path):
 
     if saw_bot_block:
         raise YoutubeSourceError(
-            "O Score Studio tentou obter o áudio 3 vezes, mas o YouTube bloqueou o acesso automático a partir deste servidor. "
-            "Podes continuar imediatamente carregando o ficheiro MP3, WAV, M4A, FLAC ou OGG.",
+            "O YouTube recusou a leitura automática do áudio mesmo depois das tentativas de compatibilidade. "
+            "Podes continuar carregando o ficheiro MP3, WAV, M4A, FLAC ou OGG.",
             "youtube_bot_block",
         ) from last_error
 
     raise YoutubeSourceError(
-        "O Score Studio tentou obter o áudio 3 vezes, mas este vídeo não ficou disponível para análise automática. "
+        "Este vídeo não ficou disponível para análise automática. "
         "Podes continuar carregando o ficheiro de áudio.",
         "youtube_unavailable",
     ) from last_error
