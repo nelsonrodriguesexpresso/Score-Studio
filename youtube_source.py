@@ -15,6 +15,8 @@ ALLOWED_HOSTS = {
     "youtu.be",
 }
 MAX_DURATION_SECONDS = 10 * 60
+POT_SERVER_HOME = "/opt/bgutil-ytdlp-pot-provider/server"
+DENO_PATH = "/usr/local/bin/deno"
 
 
 class YoutubeSourceError(Exception):
@@ -68,7 +70,7 @@ def _base_options():
         "retries": 1,
         "extractor_retries": 1,
         "fragment_retries": 1,
-        "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
+        "js_runtimes": {"deno": {"path": DENO_PATH}},
     }
 
 
@@ -142,24 +144,34 @@ def _is_bot_block(message: str) -> bool:
     )
 
 
+def _extractor_args(player_client: str):
+    return {
+        "youtube": {"player_client": [player_client]},
+        "youtubepot-bgutilscript": {"server_home": [POT_SERVER_HOME]},
+    }
+
+
 def _attempt_profiles(output_template, match_filter):
-    """Tentativas com clientes YouTube diferentes e runtime JS suportado."""
+    """Tentativas atuais: PO Token no mweb, depois clientes alternativos."""
     common = {
         "format": "bestaudio/best",
         "outtmpl": output_template,
         "match_filter": match_filter,
     }
     return [
-        dict(common),
         {
             **common,
-            "force_ipv4": True,
-            "extractor_args": {"youtube": {"player_client": ["web_embedded"]}},
+            "extractor_args": _extractor_args("mweb"),
         },
         {
             **common,
             "force_ipv4": True,
-            "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
+            "extractor_args": _extractor_args("web_safari"),
+        },
+        {
+            **common,
+            "force_ipv4": True,
+            "extractor_args": _extractor_args("android_vr"),
         },
     ]
 
@@ -228,7 +240,7 @@ def download_youtube_audio(url: str, directory: Path):
 
     if saw_bot_block:
         raise YoutubeSourceError(
-            "O YouTube recusou a leitura automática do áudio mesmo depois das tentativas de compatibilidade. "
+            "O YouTube recusou a leitura automática do áudio mesmo com o modo de compatibilidade atual. "
             "Podes continuar carregando o ficheiro MP3, WAV, M4A, FLAC ou OGG.",
             "youtube_bot_block",
         ) from last_error
