@@ -21,6 +21,7 @@ RUN python -m pip install --upgrade pip \
     && pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1+cpu torchaudio==2.5.1+cpu \
     && pip install -r requirements.txt
 
+# Modelo quantizado de 4 pistas, escolhido para o servidor de teste com pouca RAM.
 RUN python -c "from demucs.pretrained import get_model; get_model('mdx_q')"
 
 COPY . .
