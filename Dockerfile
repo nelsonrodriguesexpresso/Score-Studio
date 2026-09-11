@@ -19,10 +19,10 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip \
     && pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1+cpu torchaudio==2.5.1+cpu \
-    && pip install -r requirements.txt
+    && pip install -r requirements.txt \
+    && pip install diffq
 
 # Modelo quantizado de 4 pistas, escolhido para o servidor de teste com pouca RAM.
-# Este comentário força o Railway a construir o commit atual da branch de teste.
 RUN python -c "from demucs.pretrained import get_model; get_model('mdx_q')"
 
 COPY . .
