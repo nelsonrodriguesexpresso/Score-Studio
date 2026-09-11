@@ -26,8 +26,8 @@ jobs:
         run: |
           set +e
           videos=(
-            "https://www.youtube.com/watch?v=BaW_jenozKc"
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            "https://www.youtube.com/watch?v=mGPdWAk8Ag0"
           )
 
           failures=0
