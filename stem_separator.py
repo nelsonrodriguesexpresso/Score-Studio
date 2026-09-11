@@ -18,6 +18,8 @@ STEM_LABELS = {
     "other": "Outros",
 }
 TOKEN_RE = re.compile(r"^[a-f0-9]{32}$")
+CHUNK_SECONDS = 25
+DEMUCS_SEGMENT_SECONDS = 2
 
 
 class StemSeparationError(RuntimeError):
@@ -55,6 +57,132 @@ def stem_file(root: Path, token: str, stem: str) -> Path:
     return path
 
 
+def _run(command: list[str], *, timeout: int, env: dict[str, str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=env,
+    )
+
+
+def _split_audio(audio_path: Path, chunks_dir: Path, env: dict[str, str]) -> list[Path]:
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    pattern = chunks_dir / "chunk_%03d.wav"
+    result = _run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(audio_path),
+            "-f",
+            "segment",
+            "-segment_time",
+            str(CHUNK_SECONDS),
+            "-reset_timestamps",
+            "1",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            "44100",
+            "-ac",
+            "2",
+            str(pattern),
+        ],
+        timeout=5 * 60,
+        env=env,
+    )
+    chunks = sorted(chunks_dir.glob("chunk_*.wav"))
+    if result.returncode != 0 or not chunks:
+        print(f"[stems] ffmpeg split failed rc={result.returncode}: {(result.stdout or '')[-1200:]}", flush=True)
+        raise StemSeparationError("Não foi possível preparar o áudio para separar as pistas.")
+    return chunks
+
+
+def _demucs_chunk(chunk: Path, out_dir: Path, env: dict[str, str], index: int) -> Path:
+    result = _run(
+        [
+            sys.executable,
+            "-m",
+            "demucs.separate",
+            "-n",
+            "htdemucs",
+            "-d",
+            "cpu",
+            "-j",
+            "1",
+            "--segment",
+            str(DEMUCS_SEGMENT_SECONDS),
+            "--overlap",
+            "0.05",
+            "--shifts",
+            "0",
+            "--out",
+            str(out_dir),
+            str(chunk),
+        ],
+        timeout=6 * 60,
+        env=env,
+    )
+    if result.returncode != 0:
+        tail = (result.stdout or "")[-2400:]
+        print(f"[stems] demucs failed rc={result.returncode} chunk={index}: {tail}", flush=True)
+        if result.returncode < 0:
+            raise StemSeparationError(
+                "O motor de pistas foi interrompido por falta de recursos. Estamos a usar o modo leve de teste."
+            )
+        raise StemSeparationError("A separação de pistas falhou neste bloco de áudio.")
+
+    source_dir = out_dir / "htdemucs" / chunk.stem
+    if not source_dir.exists():
+        candidates = [p for p in (out_dir / "htdemucs").glob("*") if p.is_dir()]
+        if len(candidates) == 1:
+            source_dir = candidates[0]
+    if not source_dir.exists():
+        raise StemSeparationError("O motor de separação não devolveu as pistas esperadas.")
+    return source_dir
+
+
+def _concat_stem(parts: list[Path], target_mp3: Path, list_file: Path, env: dict[str, str]) -> None:
+    if not parts:
+        raise StemSeparationError("Faltam blocos de áudio para construir uma das pistas.")
+    list_file.write_text(
+        "".join(f"file '{part.as_posix()}'\n" for part in parts),
+        encoding="utf-8",
+    )
+    result = _run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_file),
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            str(target_mp3),
+        ],
+        timeout=5 * 60,
+        env=env,
+    )
+    if result.returncode != 0 or not target_mp3.exists():
+        print(f"[stems] ffmpeg concat failed rc={result.returncode}: {(result.stdout or '')[-1200:]}", flush=True)
+        raise StemSeparationError("Não foi possível juntar os blocos de uma das pistas.")
+
+
 def separate_audio(audio_path: Path, root: Path) -> dict:
     audio_path = Path(audio_path)
     if not audio_path.exists():
@@ -64,91 +192,41 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
     root.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex
     session_dir = root / token
+    chunks_dir = session_dir / "chunks"
     work_dir = session_dir / "demucs"
     session_dir.mkdir(parents=True, exist_ok=False)
 
-    # Limita paralelismo para manter o pico de RAM dentro do contentor Railway.
+    # Mantém o processamento estritamente sequencial no contentor de 1 GB.
     child_env = os.environ.copy()
     child_env.update({
         "OMP_NUM_THREADS": "1",
         "MKL_NUM_THREADS": "1",
         "OPENBLAS_NUM_THREADS": "1",
         "NUMEXPR_NUM_THREADS": "1",
+        "TOKENIZERS_PARALLELISM": "false",
     })
 
     try:
-        command = [
-            sys.executable,
-            "-m",
-            "demucs.separate",
-            "-n",
-            "htdemucs",
-            "-j",
-            "1",
-            "--segment",
-            "4",
-            "--overlap",
-            "0.10",
-            "--shifts",
-            "0",
-            "--out",
-            str(work_dir),
-            str(audio_path),
-        ]
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=15 * 60,
-            check=False,
-            env=child_env,
-        )
-        if result.returncode != 0:
-            tail = (result.stdout or "")[-1600:]
-            raise StemSeparationError(f"A separação de pistas falhou. {tail}")
+        # O Demucs mantém o áudio separado em memória. Para uma música inteira isso
+        # pode ultrapassar 1 GB, por isso processamos blocos curtos, um de cada vez.
+        chunks = _split_audio(audio_path, chunks_dir, child_env)
+        stem_parts: dict[str, list[Path]] = {stem: [] for stem in STEM_IDS}
 
-        source_dir = work_dir / "htdemucs" / audio_path.stem
-        if not source_dir.exists():
-            candidates = list(work_dir.glob("htdemucs/*"))
-            if len(candidates) == 1 and candidates[0].is_dir():
-                source_dir = candidates[0]
-        if not source_dir.exists():
-            raise StemSeparationError("O motor de separação não devolveu as pistas esperadas.")
+        for index, chunk in enumerate(chunks):
+            chunk_out = work_dir / f"part_{index:03d}"
+            source_dir = _demucs_chunk(chunk, chunk_out, child_env, index)
+            for stem in STEM_IDS:
+                source_wav = source_dir / f"{stem}.wav"
+                if not source_wav.exists():
+                    raise StemSeparationError(f"A pista {STEM_LABELS[stem]} não foi criada.")
+                stem_parts[stem].append(source_wav)
 
         tracks = []
         for stem in STEM_IDS:
-            source_wav = source_dir / f"{stem}.wav"
-            if not source_wav.exists():
-                raise StemSeparationError(f"A pista {STEM_LABELS[stem]} não foi criada.")
-
             target_mp3 = session_dir / f"{stem}.mp3"
-            convert = subprocess.run(
-                [
-                    "ffmpeg",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-y",
-                    "-i",
-                    str(source_wav),
-                    "-codec:a",
-                    "libmp3lame",
-                    "-b:a",
-                    "128k",
-                    str(target_mp3),
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=5 * 60,
-                check=False,
-                env=child_env,
-            )
-            if convert.returncode != 0 or not target_mp3.exists():
-                raise StemSeparationError(
-                    f"Não foi possível preparar a pista {STEM_LABELS[stem]}."
-                )
+            list_file = session_dir / f"{stem}_parts.txt"
+            _concat_stem(stem_parts[stem], target_mp3, list_file, child_env)
+            list_file.unlink(missing_ok=True)
             tracks.append(
                 {
                     "id": stem,
@@ -157,6 +235,7 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
                 }
             )
 
+        shutil.rmtree(chunks_dir, ignore_errors=True)
         shutil.rmtree(work_dir, ignore_errors=True)
         schedule_stem_cleanup(root, token)
         return {
