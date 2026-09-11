@@ -99,6 +99,14 @@ def download_youtube_audio(url: str, directory: Path):
     }
     if cookiefile:
         options["cookiefile"] = cookiefile
+        # O cliente tv_downgraded usado por defeito em sessões autenticadas
+        # está atualmente a devolver "The page needs to be reloaded" para
+        # algumas contas. Forçar estes clientes evita esse caminho.
+        options["extractor_args"] = {
+            "youtube": {
+                "player_client": ["default", "web_embedded"],
+            }
+        }
 
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
@@ -108,6 +116,10 @@ def download_youtube_audio(url: str, directory: Path):
         lower = message.lower()
         if "15 minutos" in message:
             raise YoutubeSourceError("O vídeo excede o limite de 15 minutos.") from exc
+        if "the page needs to be reloaded" in lower:
+            raise YoutubeSourceError(
+                "O YouTube recusou temporariamente o cliente autenticado. Tenta novamente dentro de instantes."
+            ) from exc
         if "sign in to confirm" in lower or "not a bot" in lower or "cookies-from-browser" in lower:
             if cookiefile:
                 raise YoutubeSourceError(
