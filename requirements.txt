@@ -7,3 +7,4 @@ soundfile>=0.12
 numpy>=1.26
 reportlab>=4.2
 yt-dlp[default]
+demucs==4.0.1
