@@ -1,5 +1,7 @@
 from pathlib import Path
 from urllib.parse import urlparse
+import base64
+import os
 import uuid
 
 import yt_dlp
@@ -13,6 +15,8 @@ ALLOWED_HOSTS = {
     "youtu.be",
 }
 MAX_DURATION_SECONDS = 15 * 60
+COOKIE_ENV_NAME = "YOUTUBE_COOKIES_B64"
+COOKIE_PATH = Path("/tmp/scorestudio-youtube-cookies.txt")
 
 
 class YoutubeSourceError(Exception):
@@ -35,11 +39,39 @@ def validate_youtube_url(url: str) -> str:
     return value
 
 
+def _youtube_cookiefile():
+    """Materializa cookies autenticados apenas em runtime, nunca no repositório."""
+    encoded = (os.getenv(COOKIE_ENV_NAME) or "").strip()
+    if not encoded:
+        return None
+
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        text = raw.decode("utf-8")
+    except Exception as exc:
+        raise YoutubeSourceError(
+            "A autenticação YouTube configurada no servidor não é válida."
+        ) from exc
+
+    if "youtube.com" not in text or "\t" not in text:
+        raise YoutubeSourceError(
+            "O ficheiro de autenticação YouTube não parece estar no formato cookies.txt esperado."
+        )
+
+    COOKIE_PATH.write_text(text, encoding="utf-8")
+    try:
+        COOKIE_PATH.chmod(0o600)
+    except Exception:
+        pass
+    return str(COOKIE_PATH)
+
+
 def download_youtube_audio(url: str, directory: Path):
     url = validate_youtube_url(url)
     directory.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex
     output_template = str(directory / f"{token}.%(ext)s")
+    cookiefile = _youtube_cookiefile()
 
     def match_filter(info, *, incomplete=False):
         duration = info.get("duration")
@@ -65,14 +97,25 @@ def download_youtube_audio(url: str, directory: Path):
             }
         ],
     }
+    if cookiefile:
+        options["cookiefile"] = cookiefile
 
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=True)
     except yt_dlp.utils.DownloadError as exc:
         message = str(exc)
+        lower = message.lower()
         if "15 minutos" in message:
             raise YoutubeSourceError("O vídeo excede o limite de 15 minutos.") from exc
+        if "sign in to confirm" in lower or "not a bot" in lower or "cookies-from-browser" in lower:
+            if cookiefile:
+                raise YoutubeSourceError(
+                    "O YouTube recusou a sessão autenticada. Os cookies podem ter expirado e precisam de ser renovados."
+                ) from exc
+            raise YoutubeSourceError(
+                "O YouTube está a exigir autenticação para este vídeo. Configura a conta dedicada do Score Studio para o analisar."
+            ) from exc
         raise YoutubeSourceError(
             "Não foi possível obter o áudio deste vídeo. O YouTube pode ter bloqueado o acesso, "
             "o vídeo pode ser privado/restrito ou o link pode não estar disponível."
