@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl ca-certificates unzip \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl ca-certificates unzip build-essential \
     && curl -fsSL -o /tmp/deno.zip https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip \
     && unzip /tmp/deno.zip -d /usr/local/bin \
     && chmod +x /usr/local/bin/deno \
