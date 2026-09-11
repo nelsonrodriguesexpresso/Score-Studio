@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import re
 import shutil
 import subprocess
@@ -66,6 +67,15 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
     work_dir = session_dir / "demucs"
     session_dir.mkdir(parents=True, exist_ok=False)
 
+    # Limita paralelismo para manter o pico de RAM dentro do contentor Railway.
+    child_env = os.environ.copy()
+    child_env.update({
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+    })
+
     try:
         command = [
             sys.executable,
@@ -75,6 +85,12 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
             "htdemucs",
             "-j",
             "1",
+            "--segment",
+            "4",
+            "--overlap",
+            "0.10",
+            "--shifts",
+            "0",
             "--out",
             str(work_dir),
             str(audio_path),
@@ -86,6 +102,7 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
             text=True,
             timeout=15 * 60,
             check=False,
+            env=child_env,
         )
         if result.returncode != 0:
             tail = (result.stdout or "")[-1600:]
@@ -118,7 +135,7 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
                     "-codec:a",
                     "libmp3lame",
                     "-b:a",
-                    "160k",
+                    "128k",
                     str(target_mp3),
                 ],
                 stdout=subprocess.PIPE,
@@ -126,6 +143,7 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
                 text=True,
                 timeout=5 * 60,
                 check=False,
+                env=child_env,
             )
             if convert.returncode != 0 or not target_mp3.exists():
                 raise StemSeparationError(
