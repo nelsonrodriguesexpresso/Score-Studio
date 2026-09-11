@@ -1,0 +1,31 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8000 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip \
+    && pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1+cpu torchaudio==2.5.1+cpu \
+    && pip install fastapi uvicorn python-multipart demucs==4.0.1 diffq
+
+# Um único modelo MDX, pré-carregado no build. O serviço dedicado evita
+# somar a memória do analisador musical ao processo de separação.
+RUN python -c "from demucs.pretrained import get_model; get_model('6b9c2ca1')"
+
+COPY stem_separator.py stem_service.py ./
+RUN mkdir -p uploads generated/stems
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn stem_service:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
