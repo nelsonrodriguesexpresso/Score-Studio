@@ -70,7 +70,11 @@ def home(request: Request):
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
-    return Response(status_code=204)
+    return FileResponse(
+        path=str(BASE / "static" / "favicon.svg"),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @app.get("/api/health")
