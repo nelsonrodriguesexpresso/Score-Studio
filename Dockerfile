@@ -22,8 +22,8 @@ RUN python -m pip install --upgrade pip \
     && pip install -r requirements.txt \
     && pip install diffq
 
-# Modelo quantizado de 4 pistas, escolhido para o servidor de teste com pouca RAM.
-RUN python -c "from demucs.pretrained import get_model; get_model('mdx_q')"
+# Um único modelo MDX mantém as quatro pistas e usa bastante menos RAM do que o ensemble mdx_q.
+RUN python -c "from demucs.pretrained import get_model; get_model('6b9c2ca1')"
 
 COPY . .
 RUN mkdir -p uploads generated
