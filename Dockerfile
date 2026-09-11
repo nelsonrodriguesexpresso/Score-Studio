@@ -21,7 +21,7 @@ RUN python -m pip install --upgrade pip \
     && pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1+cpu torchaudio==2.5.1+cpu \
     && pip install -r requirements.txt
 
-RUN python -c "from demucs.pretrained import get_model; get_model('htdemucs')"
+RUN python -c "from demucs.pretrained import get_model; get_model('mdx_q')"
 
 COPY . .
 RUN mkdir -p uploads generated
