@@ -9,6 +9,8 @@ import sys
 import threading
 import uuid
 
+import requests
+
 
 STEM_IDS = ("vocals", "bass", "drums", "other")
 STEM_LABELS = {
@@ -20,8 +22,6 @@ STEM_LABELS = {
 TOKEN_RE = re.compile(r"^[a-f0-9]{32}$")
 CHUNK_SECONDS = 25
 DEMUCS_SEGMENT_SECONDS = 2
-# mdx_q é um conjunto de vários modelos e excede o limite de 1 GB do serviço.
-# Usamos um único modelo do conjunto MDX para manter as 4 pistas com muito menos RAM.
 MODEL_NAME = "6b9c2ca1"
 
 
@@ -77,25 +77,11 @@ def _split_audio(audio_path: Path, chunks_dir: Path, env: dict[str, str]) -> lis
     pattern = chunks_dir / "chunk_%03d.wav"
     result = _run(
         [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            str(audio_path),
-            "-f",
-            "segment",
-            "-segment_time",
-            str(CHUNK_SECONDS),
-            "-reset_timestamps",
-            "1",
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            "44100",
-            "-ac",
-            "2",
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(audio_path),
+            "-f", "segment", "-segment_time", str(CHUNK_SECONDS),
+            "-reset_timestamps", "1",
+            "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
             str(pattern),
         ],
         timeout=5 * 60,
@@ -111,23 +97,14 @@ def _split_audio(audio_path: Path, chunks_dir: Path, env: dict[str, str]) -> lis
 def _demucs_chunk(chunk: Path, out_dir: Path, env: dict[str, str], index: int) -> Path:
     result = _run(
         [
-            sys.executable,
-            "-m",
-            "demucs.separate",
-            "-n",
-            MODEL_NAME,
-            "-d",
-            "cpu",
-            "-j",
-            "1",
-            "--segment",
-            str(DEMUCS_SEGMENT_SECONDS),
-            "--overlap",
-            "0.05",
-            "--shifts",
-            "0",
-            "--out",
-            str(out_dir),
+            sys.executable, "-m", "demucs.separate",
+            "-n", MODEL_NAME,
+            "-d", "cpu",
+            "-j", "1",
+            "--segment", str(DEMUCS_SEGMENT_SECONDS),
+            "--overlap", "0.05",
+            "--shifts", "0",
+            "--out", str(out_dir),
             str(chunk),
         ],
         timeout=6 * 60,
@@ -137,9 +114,7 @@ def _demucs_chunk(chunk: Path, out_dir: Path, env: dict[str, str], index: int) -
         tail = (result.stdout or "")[-2400:]
         print(f"[stems] {MODEL_NAME} failed rc={result.returncode} chunk={index}: {tail}", flush=True)
         if result.returncode < 0:
-            raise StemSeparationError(
-                "O motor de pistas foi interrompido por falta de recursos. Estamos a usar o modo leve de teste."
-            )
+            raise StemSeparationError("O motor de pistas foi interrompido por falta de recursos.")
         raise StemSeparationError("A separação de pistas falhou neste bloco de áudio.")
 
     model_root = out_dir / MODEL_NAME
@@ -156,28 +131,12 @@ def _demucs_chunk(chunk: Path, out_dir: Path, env: dict[str, str], index: int) -
 def _concat_stem(parts: list[Path], target_mp3: Path, list_file: Path, env: dict[str, str]) -> None:
     if not parts:
         raise StemSeparationError("Faltam blocos de áudio para construir uma das pistas.")
-    list_file.write_text(
-        "".join(f"file '{part.as_posix()}'\n" for part in parts),
-        encoding="utf-8",
-    )
+    list_file.write_text("".join(f"file '{part.as_posix()}'\n" for part in parts), encoding="utf-8")
     result = _run(
         [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(list_file),
-            "-codec:a",
-            "libmp3lame",
-            "-b:a",
-            "128k",
-            str(target_mp3),
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(list_file),
+            "-codec:a", "libmp3lame", "-b:a", "128k", str(target_mp3),
         ],
         timeout=5 * 60,
         env=env,
@@ -187,7 +146,36 @@ def _concat_stem(parts: list[Path], target_mp3: Path, list_file: Path, env: dict
         raise StemSeparationError("Não foi possível juntar os blocos de uma das pistas.")
 
 
-def separate_audio(audio_path: Path, root: Path) -> dict:
+def _separate_audio_remote(audio_path: Path, service_url: str, service_token: str) -> dict:
+    try:
+        with Path(audio_path).open("rb") as handle:
+            response = requests.post(
+                f"{service_url.rstrip('/')}/api/separate",
+                files={"file": (Path(audio_path).name, handle, "application/octet-stream")},
+                headers={"X-Score-Studio-Key": service_token},
+                timeout=(20, 10 * 60),
+            )
+    except requests.RequestException as exc:
+        raise StemSeparationError("O serviço dedicado de pistas não respondeu.") from exc
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise StemSeparationError("O serviço dedicado de pistas devolveu uma resposta inválida.") from exc
+
+    if response.status_code >= 400 or not data.get("ok"):
+        raise StemSeparationError(data.get("error") or "A separação de pistas falhou.")
+
+    base = service_url.rstrip("/")
+    for track in data.get("tracks", []):
+        url = str(track.get("url") or "")
+        if url.startswith("/"):
+            track["url"] = f"{base}{url}"
+    data["remote"] = True
+    return data
+
+
+def _separate_audio_local(audio_path: Path, root: Path) -> dict:
     audio_path = Path(audio_path)
     if not audio_path.exists():
         raise StemSeparationError("O áudio temporário não está disponível.")
@@ -229,26 +217,23 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
             list_file = session_dir / f"{stem}_parts.txt"
             _concat_stem(stem_parts[stem], target_mp3, list_file, child_env)
             list_file.unlink(missing_ok=True)
-            tracks.append(
-                {
-                    "id": stem,
-                    "label": STEM_LABELS[stem],
-                    "url": f"/api/stems/{token}/{stem}",
-                }
-            )
+            tracks.append({"id": stem, "label": STEM_LABELS[stem], "url": f"/api/stems/{token}/{stem}"})
 
         shutil.rmtree(chunks_dir, ignore_errors=True)
         shutil.rmtree(work_dir, ignore_errors=True)
         schedule_stem_cleanup(root, token)
-        return {
-            "session": token,
-            "expires_in": 1800,
-            "tracks": tracks,
-            "model": MODEL_NAME,
-        }
+        return {"session": token, "expires_in": 1800, "tracks": tracks, "model": MODEL_NAME}
     except subprocess.TimeoutExpired as exc:
         cleanup_stem_session(root, token)
         raise StemSeparationError("A separação de pistas demorou demasiado tempo.") from exc
     except Exception:
         cleanup_stem_session(root, token)
         raise
+
+
+def separate_audio(audio_path: Path, root: Path) -> dict:
+    service_url = os.environ.get("STEM_SERVICE_URL", "").strip()
+    service_token = os.environ.get("STEM_SERVICE_TOKEN", "").strip()
+    if service_url and service_token:
+        return _separate_audio_remote(Path(audio_path), service_url, service_token)
+    return _separate_audio_local(Path(audio_path), Path(root))
