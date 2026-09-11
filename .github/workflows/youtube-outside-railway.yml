@@ -1,0 +1,52 @@
+name: YouTube outside Railway diagnostic
+
+on:
+  push:
+    branches:
+      - test/youtube-outside-railway
+
+jobs:
+  youtube-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install yt-dlp
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade "yt-dlp[default]"
+          yt-dlp --version
+
+      - name: Test YouTube audio extraction
+        shell: bash
+        run: |
+          set +e
+          videos=(
+            "https://www.youtube.com/watch?v=BaW_jenozKc"
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+          )
+
+          failures=0
+          for url in "${videos[@]}"; do
+            echo "============================================================"
+            echo "Testing: $url"
+            echo "============================================================"
+            yt-dlp -v --no-playlist -f bestaudio --get-url "$url"
+            code=$?
+            if [ $code -eq 0 ]; then
+              echo "RESULT: SUCCESS"
+            else
+              echo "RESULT: FAILED (exit $code)"
+              failures=$((failures+1))
+            fi
+          done
+
+          echo "============================================================"
+          echo "Failures: $failures"
+          if [ $failures -gt 0 ]; then
+            exit 1
+          fi
