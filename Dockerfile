@@ -22,6 +22,7 @@ RUN python -m pip install --upgrade pip \
     && pip install -r requirements.txt
 
 # Modelo quantizado de 4 pistas, escolhido para o servidor de teste com pouca RAM.
+# Este comentário força o Railway a construir o commit atual da branch de teste.
 RUN python -c "from demucs.pretrained import get_model; get_model('mdx_q')"
 
 COPY . .
