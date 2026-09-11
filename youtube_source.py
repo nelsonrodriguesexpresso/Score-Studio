@@ -16,6 +16,7 @@ ALLOWED_HOSTS = {
 }
 MAX_DURATION_SECONDS = 10 * 60
 POT_SERVER_HOME = "/opt/bgutil-ytdlp-pot-provider/server"
+POT_BASE_URL = "http://127.0.0.1:4416"
 DENO_PATH = "/usr/local/bin/deno"
 
 
@@ -146,9 +147,12 @@ def _is_bot_block(message: str) -> bool:
 
 def _provider_extractor_args(player_client=None):
     args = {
+        "youtubepot-bgutilhttp": {
+            "base_url": [POT_BASE_URL],
+        },
         "youtubepot-bgutilscript": {
             "server_home": [POT_SERVER_HOME],
-        }
+        },
     }
     if player_client:
         args["youtube"] = {"player_client": [player_client]}
@@ -156,7 +160,7 @@ def _provider_extractor_args(player_client=None):
 
 
 def _attempt_profiles(output_template, match_filter):
-    """Perfis atuais: mweb com PO Token, seguido de dois fallbacks compatíveis."""
+    """Primeiro tenta mweb com PO Token; depois usa dois perfis de compatibilidade."""
     common = {
         "format": "bestaudio/best",
         "outtmpl": output_template,
