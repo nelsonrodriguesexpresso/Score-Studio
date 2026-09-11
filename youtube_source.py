@@ -15,6 +15,8 @@ ALLOWED_HOSTS = {
     "youtu.be",
 }
 MAX_DURATION_SECONDS = 10 * 60
+POT_SERVER_HOME = "/opt/bgutil-ytdlp-pot-provider/server"
+DENO_PATH = "/usr/local/bin/deno"
 
 
 class YoutubeSourceError(Exception):
@@ -68,7 +70,7 @@ def _base_options():
         "retries": 1,
         "extractor_retries": 1,
         "fragment_retries": 1,
-        "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
+        "js_runtimes": {"deno": {"path": DENO_PATH}},
     }
 
 
@@ -142,24 +144,38 @@ def _is_bot_block(message: str) -> bool:
     )
 
 
+def _provider_extractor_args(player_client=None):
+    args = {
+        "youtubepot-bgutilscript": {
+            "server_home": [POT_SERVER_HOME],
+        }
+    }
+    if player_client:
+        args["youtube"] = {"player_client": [player_client]}
+    return args
+
+
 def _attempt_profiles(output_template, match_filter):
-    """Tentativas com clientes YouTube diferentes e runtime JS suportado."""
+    """Perfis atuais: mweb com PO Token, seguido de dois fallbacks compatíveis."""
     common = {
         "format": "bestaudio/best",
         "outtmpl": output_template,
         "match_filter": match_filter,
     }
     return [
-        dict(common),
         {
             **common,
-            "force_ipv4": True,
-            "extractor_args": {"youtube": {"player_client": ["web_embedded"]}},
+            "extractor_args": _provider_extractor_args("mweb"),
         },
         {
             **common,
             "force_ipv4": True,
-            "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
+            "extractor_args": _provider_extractor_args("web_embedded"),
+        },
+        {
+            **common,
+            "force_ipv4": True,
+            "extractor_args": _provider_extractor_args(),
         },
     ]
 
@@ -186,6 +202,7 @@ def download_youtube_audio(url: str, directory: Path):
 
     last_error = None
     saw_bot_block = False
+    saw_provider_issue = False
 
     for attempt_no, profile in enumerate(_attempt_profiles(output_template, match_filter), start=1):
         if attempt_no > 1:
@@ -213,22 +230,33 @@ def download_youtube_audio(url: str, directory: Path):
                 wav_path = candidates[0]
 
             meta["download_attempt"] = attempt_no
+            meta["youtube_mode"] = "pot" if attempt_no == 1 else "compatibility"
             return wav_path, meta, token
 
         except yt_dlp.utils.DownloadError as exc:
             message = str(exc)
+            lowered = message.lower()
             last_error = exc
             if "10 minutos" in message:
                 raise YoutubeSourceError("O vídeo excede o limite de 10 minutos.", "duration_limit") from exc
             if _is_bot_block(message):
                 saw_bot_block = True
+            if "pot token" in lowered or "bgutil" in lowered or "provider" in lowered:
+                saw_provider_issue = True
             continue
 
     _clear_partial_downloads(directory, token)
 
+    if saw_provider_issue and not saw_bot_block:
+        raise YoutubeSourceError(
+            "O módulo de compatibilidade do YouTube não conseguiu gerar a autorização técnica necessária. "
+            "Tenta novamente dentro de alguns instantes ou carrega o ficheiro de áudio.",
+            "youtube_provider_error",
+        ) from last_error
+
     if saw_bot_block:
         raise YoutubeSourceError(
-            "O YouTube recusou a leitura automática do áudio mesmo depois das tentativas de compatibilidade. "
+            "O YouTube continua a recusar a leitura automática do áudio neste servidor, mesmo com o modo PO Token ativo. "
             "Podes continuar carregando o ficheiro MP3, WAV, M4A, FLAC ou OGG.",
             "youtube_bot_block",
         ) from last_error
