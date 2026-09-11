@@ -20,7 +20,9 @@ STEM_LABELS = {
 TOKEN_RE = re.compile(r"^[a-f0-9]{32}$")
 CHUNK_SECONDS = 25
 DEMUCS_SEGMENT_SECONDS = 2
-MODEL_NAME = "mdx_q"
+# mdx_q é um conjunto de vários modelos e excede o limite de 1 GB do serviço.
+# Usamos um único modelo do conjunto MDX para manter as 4 pistas com muito menos RAM.
+MODEL_NAME = "6b9c2ca1"
 
 
 class StemSeparationError(RuntimeError):
@@ -205,6 +207,7 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
         "OPENBLAS_NUM_THREADS": "1",
         "NUMEXPR_NUM_THREADS": "1",
         "TOKENIZERS_PARALLELISM": "false",
+        "MALLOC_ARENA_MAX": "2",
     })
 
     try:
