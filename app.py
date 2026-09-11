@@ -6,8 +6,11 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from datetime import datetime
+import importlib.metadata
 import json
 import re
+import shutil
+import subprocess
 import traceback
 import uuid
 
@@ -76,6 +79,37 @@ def favicon():
 @app.get("/api/health")
 def health():
     return {"ok": True, "version": VERSION, "message": "Score Studio ativo"}
+
+
+@app.get("/api/runtime-check", include_in_schema=False)
+def runtime_check():
+    deno_path = shutil.which("deno")
+    deno_version = None
+    if deno_path:
+        try:
+            deno_version = subprocess.run(
+                [deno_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            ).stdout.splitlines()[0]
+        except Exception:
+            deno_version = "erro ao consultar"
+
+    def package_version(name):
+        try:
+            return importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            return None
+
+    return {
+        "ok": bool(deno_path and package_version("yt-dlp-ejs")),
+        "deno_path": deno_path,
+        "deno_version": deno_version,
+        "yt_dlp": package_version("yt-dlp"),
+        "yt_dlp_ejs": package_version("yt-dlp-ejs"),
+    }
 
 
 @app.post("/api/analyze")
