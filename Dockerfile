@@ -30,8 +30,9 @@ RUN git clone --depth 1 --single-branch --branch 2.0.0 https://github.com/Braini
     && rm -rf /opt/bgutil-ytdlp-pot-provider/.git
 
 COPY . .
-RUN mkdir -p uploads generated
+RUN chmod +x /app/start.sh \
+    && mkdir -p uploads generated
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+CMD ["/app/start.sh"]
