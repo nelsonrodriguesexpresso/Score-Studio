@@ -138,8 +138,12 @@ async def analyze(
 
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
-        result = await run_in_threadpool(analyze_audio, temp_path, instrument)
+
+        # Separar antes da análise. O Demucs é a fase mais pesada em memória;
+        # fazê-lo primeiro evita somar a memória já usada pelo librosa/numba.
         stems, stems_error = await maybe_create_stems(temp_path, separate_stems)
+        result = await run_in_threadpool(analyze_audio, temp_path, instrument)
+
         result.update({
             "ok": True,
             "title": Path(filename).stem,
@@ -181,8 +185,11 @@ async def analyze_youtube(
         audio_path, title, source_duration, token = await run_in_threadpool(
             download_youtube_audio, url, UPLOADS
         )
-        result = await run_in_threadpool(analyze_audio, audio_path, instrument)
+
+        # Igual ao upload: primeiro as pistas, depois a análise musical.
         stems, stems_error = await maybe_create_stems(audio_path, separate_stems)
+        result = await run_in_threadpool(analyze_audio, audio_path, instrument)
+
         result.update({
             "ok": True,
             "title": title,
