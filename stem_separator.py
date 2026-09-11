@@ -20,6 +20,7 @@ STEM_LABELS = {
 TOKEN_RE = re.compile(r"^[a-f0-9]{32}$")
 CHUNK_SECONDS = 25
 DEMUCS_SEGMENT_SECONDS = 2
+MODEL_NAME = "mdx_q"
 
 
 class StemSeparationError(RuntimeError):
@@ -112,7 +113,7 @@ def _demucs_chunk(chunk: Path, out_dir: Path, env: dict[str, str], index: int) -
             "-m",
             "demucs.separate",
             "-n",
-            "htdemucs",
+            MODEL_NAME,
             "-d",
             "cpu",
             "-j",
@@ -132,16 +133,17 @@ def _demucs_chunk(chunk: Path, out_dir: Path, env: dict[str, str], index: int) -
     )
     if result.returncode != 0:
         tail = (result.stdout or "")[-2400:]
-        print(f"[stems] demucs failed rc={result.returncode} chunk={index}: {tail}", flush=True)
+        print(f"[stems] {MODEL_NAME} failed rc={result.returncode} chunk={index}: {tail}", flush=True)
         if result.returncode < 0:
             raise StemSeparationError(
                 "O motor de pistas foi interrompido por falta de recursos. Estamos a usar o modo leve de teste."
             )
         raise StemSeparationError("A separação de pistas falhou neste bloco de áudio.")
 
-    source_dir = out_dir / "htdemucs" / chunk.stem
+    model_root = out_dir / MODEL_NAME
+    source_dir = model_root / chunk.stem
     if not source_dir.exists():
-        candidates = [p for p in (out_dir / "htdemucs").glob("*") if p.is_dir()]
+        candidates = [p for p in model_root.glob("*") if p.is_dir()]
         if len(candidates) == 1:
             source_dir = candidates[0]
     if not source_dir.exists():
@@ -196,7 +198,6 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
     work_dir = session_dir / "demucs"
     session_dir.mkdir(parents=True, exist_ok=False)
 
-    # Mantém o processamento estritamente sequencial no contentor de 1 GB.
     child_env = os.environ.copy()
     child_env.update({
         "OMP_NUM_THREADS": "1",
@@ -207,8 +208,6 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
     })
 
     try:
-        # O Demucs mantém o áudio separado em memória. Para uma música inteira isso
-        # pode ultrapassar 1 GB, por isso processamos blocos curtos, um de cada vez.
         chunks = _split_audio(audio_path, chunks_dir, child_env)
         stem_parts: dict[str, list[Path]] = {stem: [] for stem in STEM_IDS}
 
@@ -242,6 +241,7 @@ def separate_audio(audio_path: Path, root: Path) -> dict:
             "session": token,
             "expires_in": 1800,
             "tracks": tracks,
+            "model": MODEL_NAME,
         }
     except subprocess.TimeoutExpired as exc:
         cleanup_stem_session(root, token)
