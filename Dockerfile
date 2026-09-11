@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl unzip ca-certificates \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl unzip ca-certificates git \
     && curl -fsSL https://deno.land/install.sh | sh \
     && mv /root/.deno/bin/deno /usr/local/bin/deno \
     && deno --version \
@@ -17,6 +17,10 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip \
     && pip install -r requirements.txt
+
+RUN git clone --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-ytdlp-pot-provider \
+    && cd /opt/bgutil-ytdlp-pot-provider/server \
+    && deno install --allow-scripts=npm:canvas --frozen
 
 COPY . .
 RUN mkdir -p uploads generated
