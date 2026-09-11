@@ -15,8 +15,8 @@ ALLOWED_HOSTS = {
     "youtu.be",
 }
 MAX_DURATION_SECONDS = 10 * 60
-POT_SERVER_HOME = "/opt/bgutil-ytdlp-pot-provider/server"
 DENO_PATH = "/usr/local/bin/deno"
+POT_BASE_URL = "http://127.0.0.1:4416"
 
 
 class YoutubeSourceError(Exception):
@@ -147,12 +147,12 @@ def _is_bot_block(message: str) -> bool:
 def _extractor_args(player_client: str):
     return {
         "youtube": {"player_client": [player_client]},
-        "youtubepot-bgutilscript": {"server_home": [POT_SERVER_HOME]},
+        "youtubepot-bgutilhttp": {"base_url": [POT_BASE_URL]},
     }
 
 
 def _attempt_profiles(output_template, match_filter):
-    """Tentativas atuais: PO Token no mweb, depois clientes alternativos."""
+    """Usa primeiro o cliente mweb com provider PO Token HTTP local."""
     common = {
         "format": "bestaudio/best",
         "outtmpl": output_template,
