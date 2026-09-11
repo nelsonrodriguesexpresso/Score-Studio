@@ -14,14 +14,17 @@ import uuid
 from analyzer import analyze_audio
 from pdf_export import create_pdf
 from youtube_source import download_youtube_audio, cleanup_youtube_temp, YoutubeSourceError
+from stem_separator import separate_audio, stem_file, StemSeparationError
 
 BASE = Path(__file__).resolve().parent
 UPLOADS = BASE / "uploads"
 GENERATED = BASE / "generated"
+STEMS = GENERATED / "stems"
 LOGFILE = BASE / "score_error.log"
 VERSION_FILE = BASE / "VERSION.txt"
 UPLOADS.mkdir(exist_ok=True)
 GENERATED.mkdir(exist_ok=True)
+STEMS.mkdir(parents=True, exist_ok=True)
 VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "5.0.0"
 
 app = FastAPI(title="Score Studio", version=VERSION)
@@ -59,6 +62,19 @@ def valid_instrument(instrument: str) -> bool:
     return instrument in {"bass5", "guitar", "piano"}
 
 
+async def maybe_create_stems(audio_path: Path, enabled: bool) -> tuple[dict | None, str | None]:
+    if not enabled:
+        return None, None
+    try:
+        stems = await run_in_threadpool(separate_audio, audio_path, STEMS)
+        return stems, None
+    except StemSeparationError as exc:
+        return None, str(exc)
+    except Exception as exc:
+        log_error()
+        return None, f"{type(exc).__name__}: {exc}"
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse(
@@ -82,8 +98,26 @@ def health():
     return {"ok": True, "version": VERSION, "message": "Score Studio ativo"}
 
 
+@app.get("/api/stems/{token}/{stem}")
+def get_stem(token: str, stem: str):
+    try:
+        path = stem_file(STEMS, token, stem)
+        return FileResponse(
+            path=str(path),
+            media_type="audio/mpeg",
+            filename=f"{stem}.mp3",
+            headers={"Cache-Control": "private, no-store"},
+        )
+    except StemSeparationError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+
+
 @app.post("/api/analyze")
-async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5")):
+async def analyze(
+    file: UploadFile = File(...),
+    instrument: str = Form("bass5"),
+    separate_stems: bool = Form(False),
+):
     temp_path = None
     try:
         filename = file.filename or "audio.mp3"
@@ -105,11 +139,14 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
         result = await run_in_threadpool(analyze_audio, temp_path, instrument)
+        stems, stems_error = await maybe_create_stems(temp_path, separate_stems)
         result.update({
             "ok": True,
             "title": Path(filename).stem,
             "source": "file",
             "version": VERSION,
+            "stems": stems,
+            "stems_error": stems_error,
         })
         return JSONResponse(content=json_safe(result))
     except Exception as exc:
@@ -131,7 +168,11 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
 
 
 @app.post("/api/analyze-youtube")
-async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5")):
+async def analyze_youtube(
+    url: str = Form(...),
+    instrument: str = Form("bass5"),
+    separate_stems: bool = Form(False),
+):
     token = None
     try:
         if not valid_instrument(instrument):
@@ -141,12 +182,15 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
             download_youtube_audio, url, UPLOADS
         )
         result = await run_in_threadpool(analyze_audio, audio_path, instrument)
+        stems, stems_error = await maybe_create_stems(audio_path, separate_stems)
         result.update({
             "ok": True,
             "title": title,
             "source": "youtube",
             "source_duration": source_duration,
             "version": VERSION,
+            "stems": stems,
+            "stems_error": stems_error,
         })
         return JSONResponse(content=json_safe(result))
     except YoutubeSourceError as exc:
