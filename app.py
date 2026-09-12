@@ -6,6 +6,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from datetime import datetime
+import asyncio
 import json
 import re
 import traceback
@@ -115,8 +116,10 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
 
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
-        lyrics_data, lyrics_error = await run_in_threadpool(transcribe_safely, temp_path)
-        result = await run_in_threadpool(analyze_audio, temp_path, instrument)
+        (lyrics_data, lyrics_error), result = await asyncio.gather(
+            run_in_threadpool(transcribe_safely, temp_path),
+            run_in_threadpool(analyze_audio, temp_path, instrument),
+        )
         result.update({
             "ok": True,
             "title": Path(filename).stem,
@@ -156,8 +159,10 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
         audio_path, title, source_duration, token = await run_in_threadpool(
             download_youtube_audio, url, UPLOADS
         )
-        lyrics_data, lyrics_error = await run_in_threadpool(transcribe_safely, audio_path)
-        result = await run_in_threadpool(analyze_audio, audio_path, instrument)
+        (lyrics_data, lyrics_error), result = await asyncio.gather(
+            run_in_threadpool(transcribe_safely, audio_path),
+            run_in_threadpool(analyze_audio, audio_path, instrument),
+        )
         result.update({
             "ok": True,
             "title": title,
