@@ -1,0 +1,8 @@
+.lyrics-editor{margin-top:22px;padding:22px;border:1px solid rgba(255,255,255,.09);border-radius:18px;background:rgba(255,255,255,.025)}
+.lyrics-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:8px}
+.lyrics-heading h3{margin:4px 0 0;font-size:1.25rem}
+.lyrics-language{font-size:.72rem;font-weight:700;letter-spacing:.08em;color:#79d9ae}
+.lyrics-notice{margin:0 0 13px;color:#9aa8a0;font-size:.86rem;line-height:1.5}
+.lyrics-notice.warning{color:#e6b86a}
+#lyricsText{width:100%;min-height:270px;resize:vertical;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:#08130f;color:#edf7f1;padding:16px;font:inherit;line-height:1.65;box-sizing:border-box}
+#lyricsText:focus{outline:none;border-color:#42b883;box-shadow:0 0 0 3px rgba(66,184,131,.12)}
