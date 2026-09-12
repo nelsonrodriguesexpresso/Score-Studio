@@ -14,6 +14,7 @@ import uuid
 from analyzer import analyze_audio
 from pdf_export import create_pdf
 from youtube_source import download_youtube_audio, cleanup_youtube_temp, YoutubeSourceError
+from lyrics_transcriber import transcribe_lyrics, LyricsTranscriptionError
 
 BASE = Path(__file__).resolve().parent
 UPLOADS = BASE / "uploads"
@@ -57,6 +58,16 @@ def safe_filename(value: str) -> str:
 
 def valid_instrument(instrument: str) -> bool:
     return instrument in {"bass5", "guitar", "piano"}
+
+
+def transcribe_safely(audio_path: Path) -> tuple[dict, str | None]:
+    try:
+        return transcribe_lyrics(audio_path), None
+    except LyricsTranscriptionError as exc:
+        return {}, str(exc)
+    except Exception:
+        log_error()
+        return {}, "A letra não pôde ser transcrita automaticamente."
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -104,12 +115,17 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
 
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
+        lyrics_data, lyrics_error = await run_in_threadpool(transcribe_safely, temp_path)
         result = await run_in_threadpool(analyze_audio, temp_path, instrument)
         result.update({
             "ok": True,
             "title": Path(filename).stem,
             "source": "file",
             "version": VERSION,
+            "lyrics": lyrics_data.get("text", ""),
+            "lyrics_segments": lyrics_data.get("segments", []),
+            "lyrics_language": lyrics_data.get("language"),
+            "lyrics_error": lyrics_error,
         })
         return JSONResponse(content=json_safe(result))
     except Exception as exc:
@@ -140,6 +156,7 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
         audio_path, title, source_duration, token = await run_in_threadpool(
             download_youtube_audio, url, UPLOADS
         )
+        lyrics_data, lyrics_error = await run_in_threadpool(transcribe_safely, audio_path)
         result = await run_in_threadpool(analyze_audio, audio_path, instrument)
         result.update({
             "ok": True,
@@ -147,6 +164,10 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
             "source": "youtube",
             "source_duration": source_duration,
             "version": VERSION,
+            "lyrics": lyrics_data.get("text", ""),
+            "lyrics_segments": lyrics_data.get("segments", []),
+            "lyrics_language": lyrics_data.get("language"),
+            "lyrics_error": lyrics_error,
         })
         return JSONResponse(content=json_safe(result))
     except YoutubeSourceError as exc:
@@ -173,12 +194,12 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
 def export_pdf(payload: dict = Body(...)):
     try:
         kind = payload.get("kind", "score")
-        if kind not in {"score", "chart"}:
+        if kind not in {"score", "chart", "lyrics"}:
             return JSONResponse({"ok": False, "error": "Tipo de PDF inválido."}, status_code=400)
 
         payload["version"] = VERSION
         title = safe_filename(payload.get("title", "Musica"))
-        label = "Pauta" if kind == "score" else "Partitura_Acordes"
+        label = "Pauta" if kind == "score" else ("Letra_Acordes" if kind == "lyrics" else "Partitura_Acordes")
         output = GENERATED / f"{label}_{uuid.uuid4().hex[:8]}.pdf"
         create_pdf(payload, output, kind)
 
