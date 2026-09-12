@@ -171,12 +171,13 @@ def dominant_notes(y_harm, sr, instrument, chroma):
 
 
 def analyze_audio(path: Path, instrument: str):
-    y, sr = librosa.load(str(path), sr=22050, mono=True)
+    # 11 kHz e STFT mantêm a análise musical útil, reduzindo bastante a memória
+    # necessária em músicas longas e evitando que o Railway termine o processo.
+    y, sr = librosa.load(str(path), sr=11025, mono=True)
     duration = float(librosa.get_duration(y=y, sr=sr))
     if duration < 1.0:
         raise ValueError("O áudio é demasiado curto para analisar.")
-    y_harm, y_perc = librosa.effects.hpss(y)
-    tempo, beat_frames = librosa.beat.beat_track(y=y_perc, sr=sr)
+    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=1024)
     tempo = float(np.atleast_1d(tempo)[0])
     if not np.isfinite(tempo) or tempo <= 0:
         tempo = 120.0
@@ -184,16 +185,15 @@ def analyze_audio(path: Path, instrument: str):
         tempo *= 2
     elif tempo > 190:
         tempo /= 2
-    chroma = librosa.feature.chroma_cqt(y=y_harm, sr=sr)
-    key_chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-    key = estimate_key(key_chroma)
+    chroma = librosa.feature.chroma_stft(y=y, sr=sr, n_fft=2048, hop_length=1024)
+    key = estimate_key(chroma)
     rows = bar_chroma_from_beats(chroma, beat_frames)
     if len(rows) < 4:
         rows = uniform_bar_chroma(chroma, duration, tempo)
     score_rows = [chord_scores(row) for row in rows]
     chords = smooth_chords(score_rows)
     sections = build_structure(chords)
-    notes = dominant_notes(y_harm, sr, instrument, chroma)
+    notes = dominant_notes(y, sr, instrument, chroma)
     beat_count = len(beat_frames)
     if beat_count >= 32 and duration >= 30:
         signal = "Boa"
