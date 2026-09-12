@@ -7,9 +7,12 @@ from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from datetime import datetime
 import json
+import os
 import re
 import traceback
 import uuid
+
+import httpx
 
 from analyzer import analyze_audio
 from pdf_export import create_pdf
@@ -23,6 +26,9 @@ VERSION_FILE = BASE / "VERSION.txt"
 UPLOADS.mkdir(exist_ok=True)
 GENERATED.mkdir(exist_ok=True)
 VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "5.0.0"
+
+STEM_SERVICE_URL = os.environ.get("STEM_SERVICE_URL", "").strip().rstrip("/")
+STEM_SERVICE_TOKEN = os.environ.get("STEM_SERVICE_TOKEN", "").strip()
 
 app = FastAPI(title="Score Studio", version=VERSION)
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
@@ -59,6 +65,46 @@ def valid_instrument(instrument: str) -> bool:
     return instrument in {"bass5", "guitar", "piano"}
 
 
+def separate_audio_remote(audio_path: Path) -> dict:
+    if not STEM_SERVICE_URL or not STEM_SERVICE_TOKEN:
+        raise RuntimeError("O serviço dedicado de pistas não está configurado.")
+
+    timeout = httpx.Timeout(connect=20.0, read=600.0, write=120.0, pool=20.0)
+    with audio_path.open("rb") as handle:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            response = client.post(
+                f"{STEM_SERVICE_URL}/api/separate",
+                files={"file": (audio_path.name, handle, "application/octet-stream")},
+                headers={"X-Score-Studio-Key": STEM_SERVICE_TOKEN},
+            )
+
+    try:
+        data = response.json()
+    except Exception:
+        data = {}
+
+    if response.status_code >= 400 or not data.get("ok"):
+        message = data.get("error") or f"Serviço de pistas respondeu com erro {response.status_code}."
+        raise RuntimeError(message)
+
+    for track in data.get("tracks", []):
+        url = str(track.get("url") or "")
+        if url.startswith("/"):
+            track["url"] = f"{STEM_SERVICE_URL}{url}"
+    return data
+
+
+async def maybe_create_stems(audio_path: Path, enabled: bool) -> tuple[dict | None, str | None]:
+    if not enabled:
+        return None, None
+    try:
+        stems = await run_in_threadpool(separate_audio_remote, audio_path)
+        return stems, None
+    except Exception as exc:
+        log_error()
+        return None, str(exc)
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse(
@@ -83,7 +129,11 @@ def health():
 
 
 @app.post("/api/analyze")
-async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5")):
+async def analyze(
+    file: UploadFile = File(...),
+    instrument: str = Form("bass5"),
+    separate_stems: bool = Form(False),
+):
     temp_path = None
     try:
         filename = file.filename or "audio.mp3"
@@ -104,12 +154,17 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
 
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
+
+        stems, stems_error = await maybe_create_stems(temp_path, separate_stems)
         result = await run_in_threadpool(analyze_audio, temp_path, instrument)
+
         result.update({
             "ok": True,
             "title": Path(filename).stem,
             "source": "file",
             "version": VERSION,
+            "stems": stems,
+            "stems_error": stems_error,
         })
         return JSONResponse(content=json_safe(result))
     except Exception as exc:
@@ -131,7 +186,11 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
 
 
 @app.post("/api/analyze-youtube")
-async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5")):
+async def analyze_youtube(
+    url: str = Form(...),
+    instrument: str = Form("bass5"),
+    separate_stems: bool = Form(False),
+):
     token = None
     try:
         if not valid_instrument(instrument):
@@ -140,13 +199,18 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
         audio_path, title, source_duration, token = await run_in_threadpool(
             download_youtube_audio, url, UPLOADS
         )
+
+        stems, stems_error = await maybe_create_stems(audio_path, separate_stems)
         result = await run_in_threadpool(analyze_audio, audio_path, instrument)
+
         result.update({
             "ok": True,
             "title": title,
             "source": "youtube",
             "source_duration": source_duration,
             "version": VERSION,
+            "stems": stems,
+            "stems_error": stems_error,
         })
         return JSONResponse(content=json_safe(result))
     except YoutubeSourceError as exc:
