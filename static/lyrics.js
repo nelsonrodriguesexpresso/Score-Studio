@@ -28,6 +28,43 @@
     document.getElementById("pdfLyrics").onclick = exportLyricsPdf;
   }
 
+
+  async function pollLyrics(jobId){
+    const notice = document.getElementById("lyricsNotice");
+    const text = document.getElementById("lyricsText");
+    const language = document.getElementById("lyricsLanguage");
+    if(!jobId || !notice || !text) return;
+    notice.textContent = "A transcrever a letra em segundo plano… Podes continuar a rever os acordes.";
+    for(let attempt=0; attempt<300; attempt++){
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      try{
+        const response = await fetch("/api/lyrics/" + encodeURIComponent(jobId), {cache:"no-store"});
+        const data = await response.json();
+        if(!response.ok || !data.ok) throw new Error(data.error || "Erro na transcrição.");
+        if(data.status === "processing") continue;
+        if(data.status === "complete"){
+          analysis.lyrics = data.lyrics || "";
+          analysis.lyrics_language = data.language || "";
+          text.value = analysis.lyrics;
+          language.textContent = analysis.lyrics_language ? analysis.lyrics_language.toUpperCase() : "";
+          notice.textContent = "Transcrição concluída. Revê e corrige eventuais palavras antes de exportar.";
+          notice.classList.remove("warning");
+          return;
+        }
+        notice.textContent = (data.error || "Não foi possível transcrever a letra.") + " Podes escrever ou colar a letra manualmente.";
+        notice.classList.add("warning");
+        return;
+      }catch(error){
+        if(attempt < 4) continue;
+        notice.textContent = "A ligação à transcrição foi interrompida. A análise dos acordes continua disponível.";
+        notice.classList.add("warning");
+        return;
+      }
+    }
+    notice.textContent = "A transcrição está a demorar mais do que o previsto.";
+    notice.classList.add("warning");
+  }
+
   const originalPopulateReview = window.populateReview;
   window.populateReview = function(){
     originalPopulateReview.apply(this, arguments);
@@ -40,6 +77,8 @@
     if(analysis?.lyrics_error){
       notice.textContent = analysis.lyrics_error + " Podes escrever ou colar a letra manualmente.";
       notice.classList.add("warning");
+    }else if(analysis?.lyrics_job){
+      pollLyrics(analysis.lyrics_job);
     }else{
       notice.textContent = "Transcrição automática: revê e corrige eventuais palavras antes de exportar.";
       notice.classList.remove("warning");
