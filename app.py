@@ -7,6 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from datetime import datetime
 import threading
+import gc
 import json
 import re
 import traceback
@@ -73,6 +74,7 @@ def transcribe_safely(audio_path: Path) -> tuple[dict, str | None]:
 
 LYRICS_JOBS: dict[str, dict] = {}
 LYRICS_LOCK = threading.Lock()
+LYRICS_RUN_LOCK = threading.Lock()
 
 
 def start_lyrics_job(audio_path: Path, cleanup=None) -> str:
@@ -82,7 +84,8 @@ def start_lyrics_job(audio_path: Path, cleanup=None) -> str:
 
     def worker():
         try:
-            data, error = transcribe_safely(Path(audio_path))
+            with LYRICS_RUN_LOCK:
+                data, error = transcribe_safely(Path(audio_path))
             with LYRICS_LOCK:
                 LYRICS_JOBS[job_id] = {
                     "status": "error" if error else "complete",
@@ -161,6 +164,7 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
         result = await run_in_threadpool(analyze_audio, temp_path, instrument)
+        gc.collect()
         lyrics_job = start_lyrics_job(
             temp_path,
             cleanup=lambda path=temp_path: path.unlink(missing_ok=True),
@@ -205,6 +209,7 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
             download_youtube_audio, url, UPLOADS
         )
         result = await run_in_threadpool(analyze_audio, audio_path, instrument)
+        gc.collect()
         lyrics_job = start_lyrics_job(
             audio_path,
             cleanup=lambda current_token=token: cleanup_youtube_temp(UPLOADS, current_token),
