@@ -7,25 +7,28 @@ from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from datetime import datetime
 import json
+import os
 import re
 import traceback
 import uuid
 
+import httpx
+
 from analyzer import analyze_audio
 from pdf_export import create_pdf
 from youtube_source import download_youtube_audio, cleanup_youtube_temp, YoutubeSourceError
-from stem_separator import separate_audio, stem_file, StemSeparationError
 
 BASE = Path(__file__).resolve().parent
 UPLOADS = BASE / "uploads"
 GENERATED = BASE / "generated"
-STEMS = GENERATED / "stems"
 LOGFILE = BASE / "score_error.log"
 VERSION_FILE = BASE / "VERSION.txt"
 UPLOADS.mkdir(exist_ok=True)
 GENERATED.mkdir(exist_ok=True)
-STEMS.mkdir(parents=True, exist_ok=True)
 VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "5.0.0"
+
+STEM_SERVICE_URL = os.environ.get("STEM_SERVICE_URL", "").strip().rstrip("/")
+STEM_SERVICE_TOKEN = os.environ.get("STEM_SERVICE_TOKEN", "").strip()
 
 app = FastAPI(title="Score Studio", version=VERSION)
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
@@ -62,17 +65,44 @@ def valid_instrument(instrument: str) -> bool:
     return instrument in {"bass5", "guitar", "piano"}
 
 
+def separate_audio_remote(audio_path: Path) -> dict:
+    if not STEM_SERVICE_URL or not STEM_SERVICE_TOKEN:
+        raise RuntimeError("O serviço dedicado de pistas não está configurado.")
+
+    timeout = httpx.Timeout(connect=20.0, read=600.0, write=120.0, pool=20.0)
+    with audio_path.open("rb") as handle:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            response = client.post(
+                f"{STEM_SERVICE_URL}/api/separate",
+                files={"file": (audio_path.name, handle, "application/octet-stream")},
+                headers={"X-Score-Studio-Key": STEM_SERVICE_TOKEN},
+            )
+
+    try:
+        data = response.json()
+    except Exception:
+        data = {}
+
+    if response.status_code >= 400 or not data.get("ok"):
+        message = data.get("error") or f"Serviço de pistas respondeu com erro {response.status_code}."
+        raise RuntimeError(message)
+
+    for track in data.get("tracks", []):
+        url = str(track.get("url") or "")
+        if url.startswith("/"):
+            track["url"] = f"{STEM_SERVICE_URL}{url}"
+    return data
+
+
 async def maybe_create_stems(audio_path: Path, enabled: bool) -> tuple[dict | None, str | None]:
     if not enabled:
         return None, None
     try:
-        stems = await run_in_threadpool(separate_audio, audio_path, STEMS)
+        stems = await run_in_threadpool(separate_audio_remote, audio_path)
         return stems, None
-    except StemSeparationError as exc:
-        return None, str(exc)
     except Exception as exc:
         log_error()
-        return None, f"{type(exc).__name__}: {exc}"
+        return None, str(exc)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -96,20 +126,6 @@ def favicon():
 @app.get("/api/health")
 def health():
     return {"ok": True, "version": VERSION, "message": "Score Studio ativo"}
-
-
-@app.get("/api/stems/{token}/{stem}")
-def get_stem(token: str, stem: str):
-    try:
-        path = stem_file(STEMS, token, stem)
-        return FileResponse(
-            path=str(path),
-            media_type="audio/mpeg",
-            filename=f"{stem}.mp3",
-            headers={"Cache-Control": "private, no-store"},
-        )
-    except StemSeparationError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
 
 
 @app.post("/api/analyze")
@@ -139,8 +155,6 @@ async def analyze(
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
 
-        # Separar antes da análise. O Demucs é a fase mais pesada em memória;
-        # fazê-lo primeiro evita somar a memória já usada pelo librosa/numba.
         stems, stems_error = await maybe_create_stems(temp_path, separate_stems)
         result = await run_in_threadpool(analyze_audio, temp_path, instrument)
 
@@ -186,7 +200,6 @@ async def analyze_youtube(
             download_youtube_audio, url, UPLOADS
         )
 
-        # Igual ao upload: primeiro as pistas, depois a análise musical.
         stems, stems_error = await maybe_create_stems(audio_path, separate_stems)
         result = await run_in_threadpool(analyze_audio, audio_path, instrument)
 
