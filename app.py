@@ -6,7 +6,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from datetime import datetime
-import asyncio
+import threading
 import json
 import re
 import traceback
@@ -71,6 +71,50 @@ def transcribe_safely(audio_path: Path) -> tuple[dict, str | None]:
         return {}, "A letra não pôde ser transcrita automaticamente."
 
 
+LYRICS_JOBS: dict[str, dict] = {}
+LYRICS_LOCK = threading.Lock()
+
+
+def start_lyrics_job(audio_path: Path, cleanup=None) -> str:
+    job_id = uuid.uuid4().hex
+    with LYRICS_LOCK:
+        LYRICS_JOBS[job_id] = {"status": "processing"}
+
+    def worker():
+        try:
+            data, error = transcribe_safely(Path(audio_path))
+            with LYRICS_LOCK:
+                LYRICS_JOBS[job_id] = {
+                    "status": "error" if error else "complete",
+                    "lyrics": data.get("text", ""),
+                    "segments": data.get("segments", []),
+                    "language": data.get("language"),
+                    "error": error,
+                }
+        finally:
+            if cleanup:
+                try:
+                    cleanup()
+                except Exception:
+                    pass
+            timer = threading.Timer(1800, lambda: LYRICS_JOBS.pop(job_id, None))
+            timer.daemon = True
+            timer.start()
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    return job_id
+
+
+@app.get("/api/lyrics/{job_id}")
+def lyrics_status(job_id: str):
+    with LYRICS_LOCK:
+        job = LYRICS_JOBS.get(job_id)
+    if not job:
+        return JSONResponse({"ok": False, "error": "Transcrição não encontrada ou expirada."}, status_code=404)
+    return {"ok": True, **job}
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse(
@@ -116,19 +160,20 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
 
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
-        (lyrics_data, lyrics_error), result = await asyncio.gather(
-            run_in_threadpool(transcribe_safely, temp_path),
-            run_in_threadpool(analyze_audio, temp_path, instrument),
+        result = await run_in_threadpool(analyze_audio, temp_path, instrument)
+        lyrics_job = start_lyrics_job(
+            temp_path,
+            cleanup=lambda path=temp_path: path.unlink(missing_ok=True),
         )
+        temp_path = None
         result.update({
             "ok": True,
             "title": Path(filename).stem,
             "source": "file",
             "version": VERSION,
-            "lyrics": lyrics_data.get("text", ""),
-            "lyrics_segments": lyrics_data.get("segments", []),
-            "lyrics_language": lyrics_data.get("language"),
-            "lyrics_error": lyrics_error,
+            "lyrics": "",
+            "lyrics_job": lyrics_job,
+            "lyrics_status": "processing",
         })
         return JSONResponse(content=json_safe(result))
     except Exception as exc:
@@ -159,20 +204,21 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
         audio_path, title, source_duration, token = await run_in_threadpool(
             download_youtube_audio, url, UPLOADS
         )
-        (lyrics_data, lyrics_error), result = await asyncio.gather(
-            run_in_threadpool(transcribe_safely, audio_path),
-            run_in_threadpool(analyze_audio, audio_path, instrument),
+        result = await run_in_threadpool(analyze_audio, audio_path, instrument)
+        lyrics_job = start_lyrics_job(
+            audio_path,
+            cleanup=lambda current_token=token: cleanup_youtube_temp(UPLOADS, current_token),
         )
+        token = None
         result.update({
             "ok": True,
             "title": title,
             "source": "youtube",
             "source_duration": source_duration,
             "version": VERSION,
-            "lyrics": lyrics_data.get("text", ""),
-            "lyrics_segments": lyrics_data.get("segments", []),
-            "lyrics_language": lyrics_data.get("language"),
-            "lyrics_error": lyrics_error,
+            "lyrics": "",
+            "lyrics_job": lyrics_job,
+            "lyrics_status": "processing",
         })
         return JSONResponse(content=json_safe(result))
     except YoutubeSourceError as exc:
