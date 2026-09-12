@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl ca-certificates unzip build-essential \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl ca-certificates unzip \
     && curl -fsSL -o /tmp/deno.zip https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip \
     && unzip /tmp/deno.zip -d /usr/local/bin \
     && chmod +x /usr/local/bin/deno \
@@ -18,12 +18,7 @@ RUN apt-get update \
 
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip \
-    && pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1+cpu torchaudio==2.5.1+cpu \
-    && pip install -r requirements.txt \
-    && pip install diffq
-
-# Um único modelo MDX mantém as quatro pistas e usa bastante menos RAM do que o ensemble mdx_q.
-RUN python -c "from demucs.pretrained import get_model; get_model('6b9c2ca1')"
+    && pip install -r requirements.txt
 
 COPY . .
 RUN mkdir -p uploads generated
