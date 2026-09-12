@@ -307,8 +307,85 @@ def create_chart(payload, output):
     c.save()
 
 
+
+def wrap_text(c, text, font_name, font_size, max_width):
+    words = safe_text(text).split()
+    lines = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if not current or c.stringWidth(candidate, font_name, font_size) <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def create_lyrics(payload, output):
+    c = canvas.Canvas(str(output), pagesize=A4)
+    page_no = 1
+    y = draw_page_header(c, payload, "LETRA E ACORDES", page_no)
+    width = PAGE_W - 2 * MARGIN_X
+
+    c.setFillColor(MUTED)
+    c.setFont("Helvetica", 7.2)
+    c.drawString(MARGIN_X, y, "Letra transcrita automaticamente. Rever antes da utilização final.")
+    y -= 8 * mm
+
+    c.setFillColor(DARK)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(MARGIN_X, y, "ACORDES DETETADOS")
+    y -= 6 * mm
+    c.setFont("Helvetica", 8.5)
+    for section in payload.get("sections", []):
+        chords = "  |  ".join(safe_text(chord) for chord in (section.get("chords") or []))
+        line = f"{safe_text(section.get('name', 'SECÇÃO')).upper()}: {chords}"
+        for wrapped in wrap_text(c, line, "Helvetica", 8.5, width):
+            if y < BOTTOM + 8 * mm:
+                draw_footer(c, payload)
+                c.showPage()
+                page_no += 1
+                y = draw_page_header(c, payload, "LETRA E ACORDES", page_no)
+            c.drawString(MARGIN_X, y, wrapped)
+            y -= 4.5 * mm
+        y -= 1.5 * mm
+
+    y -= 3 * mm
+    c.setFillColor(DARK)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(MARGIN_X, y, "LETRA")
+    y -= 6 * mm
+    c.setFont("Helvetica", 9.2)
+    c.setFillColor(black)
+
+    lyrics = str(payload.get("lyrics") or "").strip()
+    blocks = lyrics.splitlines() if lyrics else ["Não foi fornecida uma letra."]
+    for block in blocks:
+        lines = wrap_text(c, block, "Helvetica", 9.2, width) if block.strip() else [""]
+        for line in lines:
+            if y < BOTTOM + 7 * mm:
+                draw_footer(c, payload)
+                c.showPage()
+                page_no += 1
+                y = draw_page_header(c, payload, "LETRA E ACORDES", page_no)
+                c.setFont("Helvetica", 9.2)
+                c.setFillColor(black)
+            c.drawString(MARGIN_X, y, line)
+            y -= 5.2 * mm
+        if not block.strip():
+            y -= 2 * mm
+
+    draw_footer(c, payload)
+    c.save()
+
+
 def create_pdf(payload, output, kind):
     if kind == "chart":
         create_chart(payload, output)
+    elif kind == "lyrics":
+        create_lyrics(payload, output)
     else:
         create_score(payload, output)
