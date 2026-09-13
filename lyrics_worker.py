@@ -19,10 +19,13 @@ def main():
     )
     segments, info = model.transcribe(
         str(audio_path),
+        language="pt",
+        task="transcribe",
+        initial_prompt="Letra de uma canção em português de Portugal.",
         beam_size=1,
         best_of=1,
         vad_filter=True,
-        condition_on_previous_text=False,
+        condition_on_previous_text=True,
     )
     items = []
     for segment in segments:
@@ -36,7 +39,7 @@ def main():
     print(json.dumps({
         "text": "\n".join(item["text"] for item in items),
         "segments": items,
-        "language": getattr(info, "language", None),
+        "language": "pt-PT",
         "language_probability": round(float(getattr(info, "language_probability", 0) or 0), 3),
     }, ensure_ascii=False))
 
