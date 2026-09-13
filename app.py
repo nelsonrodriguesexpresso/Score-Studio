@@ -17,6 +17,7 @@ from analyzer import analyze_audio
 from pdf_export import create_pdf
 from youtube_source import download_youtube_audio, cleanup_youtube_temp, YoutubeSourceError
 from lyrics_transcriber import transcribe_lyrics, LyricsTranscriptionError
+from lyrics_lookup import find_lyrics
 
 BASE = Path(__file__).resolve().parent
 UPLOADS = BASE / "uploads"
@@ -77,21 +78,27 @@ LYRICS_LOCK = threading.Lock()
 LYRICS_RUN_LOCK = threading.Lock()
 
 
-def start_lyrics_job(audio_path: Path, cleanup=None) -> str:
+def start_lyrics_job(audio_path: Path, title: str = "", duration: float = 0, cleanup=None) -> str:
     job_id = uuid.uuid4().hex
     with LYRICS_LOCK:
         LYRICS_JOBS[job_id] = {"status": "processing"}
 
     def worker():
         try:
-            with LYRICS_RUN_LOCK:
-                data, error = transcribe_safely(Path(audio_path))
+            data = find_lyrics(title, duration)
+            error = None
+            if not data:
+                with LYRICS_RUN_LOCK:
+                    data, error = transcribe_safely(Path(audio_path))
             with LYRICS_LOCK:
                 LYRICS_JOBS[job_id] = {
                     "status": "error" if error else "complete",
                     "lyrics": data.get("text", ""),
                     "segments": data.get("segments", []),
                     "language": data.get("language"),
+                    "source": data.get("source", "audio"),
+                    "track": data.get("track"),
+                    "artist": data.get("artist"),
                     "error": error,
                 }
         finally:
@@ -167,6 +174,8 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
         gc.collect()
         lyrics_job = start_lyrics_job(
             temp_path,
+            title=Path(filename).stem,
+            duration=float(result.get("duration") or 0),
             cleanup=lambda path=temp_path: path.unlink(missing_ok=True),
         )
         temp_path = None
@@ -212,6 +221,8 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
         gc.collect()
         lyrics_job = start_lyrics_job(
             audio_path,
+            title=title,
+            duration=source_duration,
             cleanup=lambda current_token=token: cleanup_youtube_temp(UPLOADS, current_token),
         )
         token = None
