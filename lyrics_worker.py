@@ -11,7 +11,7 @@ def main():
 
     audio_path = Path(sys.argv[1])
     model = WhisperModel(
-        "/app/models/whisper-tiny",
+        "/app/models/whisper-base",
         device="cpu",
         compute_type="int8",
         cpu_threads=1,
@@ -22,10 +22,12 @@ def main():
         language="pt",
         task="transcribe",
         initial_prompt="Letra de uma canção em português de Portugal.",
-        beam_size=1,
-        best_of=1,
+        beam_size=3,
+        best_of=3,
         vad_filter=True,
-        condition_on_previous_text=True,
+        condition_on_previous_text=False,
+        repetition_penalty=1.1,
+        no_repeat_ngram_size=3,
     )
     items = []
     for segment in segments:
