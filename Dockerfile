@@ -21,7 +21,7 @@ RUN python -m pip install --upgrade pip \
     && pip install -r requirements.txt
 
 RUN mkdir -p /app/models \
-    && python -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-tiny', local_dir='/app/models/whisper-tiny')"
+    && python -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-base', local_dir='/app/models/whisper-base')"
 
 COPY . .
 RUN mkdir -p uploads generated
