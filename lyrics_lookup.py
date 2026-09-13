@@ -21,6 +21,27 @@ def _normalise(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
+def _latin_ratio(text: str) -> float:
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return 0.0
+    latin = sum("LATIN" in unicodedata.name(char, "") for char in letters)
+    return latin / len(letters)
+
+
+def _looks_portuguese(text: str) -> bool:
+    if _latin_ratio(text) < 0.97:
+        return False
+    words = set(_normalise(text).split())
+    clues = {
+        "a", "ao", "aos", "as", "com", "como", "da", "das", "de", "do", "dos",
+        "e", "ela", "ele", "em", "eu", "me", "meu", "minha", "na", "nao",
+        "nas", "no", "nos", "o", "os", "para", "por", "que", "se", "sem",
+        "sou", "te", "tem", "tu", "um", "uma", "voce",
+    }
+    return len(words & clues) >= 3
+
+
 def _title_artist(label: str) -> tuple[str, str]:
     cleaned = _clean(label)
     if " - " in cleaned:
@@ -49,20 +70,27 @@ def find_lyrics(label: str, duration: float = 0) -> dict | None:
     best_score = 0.0
     for item in candidates[:20]:
         lyrics = (item.get("plainLyrics") or "").strip()
-        if not lyrics:
+        if not lyrics or not _looks_portuguese(lyrics):
             continue
         candidate_title = _normalise(item.get("trackName", ""))
         candidate_artist = _normalise(item.get("artistName", ""))
         title_score = SequenceMatcher(None, wanted_title, candidate_title).ratio()
-        artist_score = SequenceMatcher(None, wanted_artist, candidate_artist).ratio() if wanted_artist else 0.65
-        score = title_score * 0.72 + artist_score * 0.28
         item_duration = float(item.get("duration") or 0)
-        if duration and item_duration and abs(duration - item_duration) <= 8:
-            score += 0.08
+        duration_gap = abs(duration - item_duration) if duration and item_duration else None
+        if wanted_artist:
+            artist_score = SequenceMatcher(None, wanted_artist, candidate_artist).ratio()
+            score = title_score * 0.72 + artist_score * 0.28
+        else:
+            # Sem artista, só a duração pode distinguir músicas com o mesmo título.
+            if duration_gap is None or duration_gap > 4:
+                continue
+            score = title_score
+        if duration_gap is not None and duration_gap <= 4:
+            score += 0.06
         if score > best_score:
             best_score, best = score, item
 
-    if not best or best_score < 0.68:
+    if not best or best_score < 0.82:
         return None
     return {
         "text": best["plainLyrics"].strip(),
