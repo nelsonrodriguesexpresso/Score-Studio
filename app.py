@@ -17,7 +17,7 @@ from analyzer import analyze_audio
 from pdf_export import create_pdf
 from youtube_source import download_youtube_audio, cleanup_youtube_temp, YoutubeSourceError
 from lyrics_transcriber import transcribe_lyrics, LyricsTranscriptionError
-from lyrics_lookup import find_lyrics
+from lyrics_lookup import find_lyrics, audio_title
 
 BASE = Path(__file__).resolve().parent
 UPLOADS = BASE / "uploads"
@@ -170,18 +170,19 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
 
         temp_path = UPLOADS / f"{uuid.uuid4().hex}{ext}"
         temp_path.write_bytes(content)
+        detected_title = audio_title(temp_path, Path(filename).stem)
         result = await run_in_threadpool(analyze_audio, temp_path, instrument)
         gc.collect()
         lyrics_job = start_lyrics_job(
             temp_path,
-            title=Path(filename).stem,
+            title=detected_title,
             duration=float(result.get("duration") or 0),
             cleanup=lambda path=temp_path: path.unlink(missing_ok=True),
         )
         temp_path = None
         result.update({
             "ok": True,
-            "title": Path(filename).stem,
+            "title": detected_title,
             "source": "file",
             "version": VERSION,
             "lyrics": "",
