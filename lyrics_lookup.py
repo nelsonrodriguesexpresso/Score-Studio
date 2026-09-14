@@ -5,8 +5,25 @@ import json
 import re
 import unicodedata
 
+from mutagen import File as MutagenFile
+
 
 API_URL = "https://lrclib.net/api/search"
+
+
+def audio_title(path, fallback: str) -> str:
+    """Obtém Artista - Título das etiquetas do ficheiro, quando existem."""
+    try:
+        tags = MutagenFile(str(path), easy=True)
+        title = str((tags.get("title") or [""])[0]).strip() if tags else ""
+        artist = str((tags.get("artist") or tags.get("albumartist") or [""])[0]).strip() if tags else ""
+        if title and artist:
+            return f"{artist} - {title}"
+        if title:
+            return title
+    except Exception:
+        pass
+    return fallback
 
 
 def _clean(value: str) -> str:
