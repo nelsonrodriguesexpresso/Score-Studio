@@ -6,7 +6,6 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from datetime import datetime
-import threading
 import gc
 import json
 import re
@@ -16,8 +15,7 @@ import uuid
 from analyzer import analyze_audio
 from pdf_export import create_pdf
 from youtube_source import download_youtube_audio, cleanup_youtube_temp, YoutubeSourceError
-from lyrics_transcriber import transcribe_lyrics, LyricsTranscriptionError
-from lyrics_lookup import find_lyrics, audio_title
+from mutagen import File as MutagenFile
 
 BASE = Path(__file__).resolve().parent
 UPLOADS = BASE / "uploads"
@@ -63,66 +61,16 @@ def valid_instrument(instrument: str) -> bool:
     return instrument in {"bass5", "guitar", "piano"}
 
 
-def transcribe_safely(audio_path: Path) -> tuple[dict, str | None]:
+def audio_title(path, fallback: str) -> str:
     try:
-        return transcribe_lyrics(audio_path), None
-    except LyricsTranscriptionError as exc:
-        return {}, str(exc)
+        tags = MutagenFile(str(path), easy=True)
+        title = str((tags.get("title") or [""])[0]).strip() if tags else ""
+        artist = str((tags.get("artist") or tags.get("albumartist") or [""])[0]).strip() if tags else ""
+        if title and artist:
+            return f"{artist} - {title}"
+        return title or fallback
     except Exception:
-        log_error()
-        return {}, "A letra não pôde ser transcrita automaticamente."
-
-
-LYRICS_JOBS: dict[str, dict] = {}
-LYRICS_LOCK = threading.Lock()
-LYRICS_RUN_LOCK = threading.Lock()
-
-
-def start_lyrics_job(audio_path: Path, title: str = "", duration: float = 0, cleanup=None) -> str:
-    job_id = uuid.uuid4().hex
-    with LYRICS_LOCK:
-        LYRICS_JOBS[job_id] = {"status": "processing"}
-
-    def worker():
-        try:
-            data = find_lyrics(title, duration)
-            error = None
-            if not data:
-                with LYRICS_RUN_LOCK:
-                    data, error = transcribe_safely(Path(audio_path))
-            with LYRICS_LOCK:
-                LYRICS_JOBS[job_id] = {
-                    "status": "error" if error else "complete",
-                    "lyrics": data.get("text", ""),
-                    "segments": data.get("segments", []),
-                    "language": data.get("language"),
-                    "source": data.get("source", "audio"),
-                    "track": data.get("track"),
-                    "artist": data.get("artist"),
-                    "error": error,
-                }
-        finally:
-            if cleanup:
-                try:
-                    cleanup()
-                except Exception:
-                    pass
-            timer = threading.Timer(1800, lambda: LYRICS_JOBS.pop(job_id, None))
-            timer.daemon = True
-            timer.start()
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    return job_id
-
-
-@app.get("/api/lyrics/{job_id}")
-def lyrics_status(job_id: str):
-    with LYRICS_LOCK:
-        job = LYRICS_JOBS.get(job_id)
-    if not job:
-        return JSONResponse({"ok": False, "error": "Transcrição não encontrada ou expirada."}, status_code=404)
-    return {"ok": True, **job}
+        return fallback
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -173,21 +121,11 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
         detected_title = audio_title(temp_path, Path(filename).stem)
         result = await run_in_threadpool(analyze_audio, temp_path, instrument)
         gc.collect()
-        lyrics_job = start_lyrics_job(
-            temp_path,
-            title=detected_title,
-            duration=float(result.get("duration") or 0),
-            cleanup=lambda path=temp_path: path.unlink(missing_ok=True),
-        )
-        temp_path = None
         result.update({
             "ok": True,
             "title": detected_title,
             "source": "file",
             "version": VERSION,
-            "lyrics": "",
-            "lyrics_job": lyrics_job,
-            "lyrics_status": "processing",
         })
         return JSONResponse(content=json_safe(result))
     except Exception as exc:
@@ -220,22 +158,12 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
         )
         result = await run_in_threadpool(analyze_audio, audio_path, instrument)
         gc.collect()
-        lyrics_job = start_lyrics_job(
-            audio_path,
-            title=title,
-            duration=source_duration,
-            cleanup=lambda current_token=token: cleanup_youtube_temp(UPLOADS, current_token),
-        )
-        token = None
         result.update({
             "ok": True,
             "title": title,
             "source": "youtube",
             "source_duration": source_duration,
             "version": VERSION,
-            "lyrics": "",
-            "lyrics_job": lyrics_job,
-            "lyrics_status": "processing",
         })
         return JSONResponse(content=json_safe(result))
     except YoutubeSourceError as exc:
@@ -262,12 +190,12 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
 def export_pdf(payload: dict = Body(...)):
     try:
         kind = payload.get("kind", "score")
-        if kind not in {"score", "chart", "lyrics"}:
+        if kind not in {"score", "chart"}:
             return JSONResponse({"ok": False, "error": "Tipo de PDF inválido."}, status_code=400)
 
         payload["version"] = VERSION
         title = safe_filename(payload.get("title", "Musica"))
-        label = "Pauta" if kind == "score" else ("Letra_Acordes" if kind == "lyrics" else "Partitura_Acordes")
+        label = "Pauta" if kind == "score" else "Partitura_Acordes"
         output = GENERATED / f"{label}_{uuid.uuid4().hex[:8]}.pdf"
         create_pdf(payload, output, kind)
 
