@@ -11,6 +11,8 @@ import json
 import re
 import traceback
 import uuid
+from threading import Lock
+from audio_guides import generate_guide
 
 from analyzer import analyze_audio
 from pdf_export import create_pdf
@@ -27,6 +29,7 @@ GENERATED.mkdir(exist_ok=True)
 VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "5.0.0"
 
 app = FastAPI(title="Score Studio", version=VERSION)
+guide_lock = Lock()
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
@@ -215,3 +218,26 @@ def export_pdf(payload: dict = Body(...)):
             },
             status_code=500,
         )
+
+
+@app.post("/api/audio-guide")
+def audio_guide(payload: dict = Body(...)):
+    if not guide_lock.acquire(blocking=False):
+        return JSONResponse({"ok": False, "error": "Já existe uma pista a ser gerada. Tenta novamente dentro de instantes."}, status_code=429)
+    output = GENERATED / f"guide_{uuid.uuid4().hex}.wav"
+    try:
+        generate_guide(payload, output)
+        label = "Click" if payload.get("kind") == "click" else "Guia_Voz_PT-PT"
+        return FileResponse(str(output), media_type="audio/wav",
+                            filename=f"{label}_{safe_filename(payload.get('title'))}.wav",
+                            headers={"Cache-Control": "no-store"},
+                            background=BackgroundTask(lambda: output.unlink(missing_ok=True)))
+    except ValueError as exc:
+        output.unlink(missing_ok=True)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception:
+        output.unlink(missing_ok=True)
+        log_error()
+        return JSONResponse({"ok": False, "error": "Não foi possível gerar a pista de áudio. Tenta novamente."}, status_code=500)
+    finally:
+        guide_lock.release()

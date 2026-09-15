@@ -9,6 +9,7 @@
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/youtube.css">
+  <link rel="stylesheet" href="/static/audio-guides.css?v={{ version }}">
 </head>
 <body>
 <div class="ambient ambient-one"></div>
@@ -133,6 +134,28 @@
         <article class="export-card"><div class="export-icon">♬</div><div><span class="export-label">PARTITURA DE ACORDES</span><h3>Estrutura harmónica</h3><p>Secções, repetições, números de compasso e acordes num formato limpo e direto.</p></div><button id="pdfChart" class="btn btn-secondary">Exportar PDF Partitura</button></article>
       </div>
       <div id="exportStatus" class="status hidden"></div>
+      <section id="guidePanel" class="guide-panel" aria-labelledby="guideHeading">
+        <div class="panel-heading"><div><span class="kicker">PISTAS PARA ENSAIO E PALCO</span><h3 id="guideHeading">Click e guia de voz</h3><p>Duas pistas WAV separadas, com a mesma duração e o mesmo ponto zero da música. Voz sintética em português de Portugal.</p></div></div>
+        <p>Os nomes e as entradas são estimativas. Revê a sequência abaixo, incluindo cada repetição. Esta sequência de avisos é independente do agrupamento de acordes dos PDFs.</p>
+        <div class="guide-settings">
+          <label class="field"><span>Click</span><select id="guideMode"><option value="detected">Batidas detetadas no áudio</option><option value="fixed">BPM fixo</option></select></label>
+          <label class="field"><span>BPM do click fixo</span><input id="guideTempo" type="number" min="30" max="300" step="0.01" value="120"></label>
+          <label class="field"><span>Compasso do click</span><select id="guideMeter"><option>4/4</option><option>3/4</option><option>6/8</option><option>2/4</option></select></label>
+          <label class="field"><span>Ajuste do click (segundos)</span><input id="guideOffset" type="number" min="-10" max="10" step="0.01" value="0"></label>
+          <label class="field"><span>Primeiro tempo forte</span><select id="guideAccent"></select></label>
+          <label class="field"><span>Antecipar a voz</span><select id="guideLead"><option value="0">Na entrada</option><option value="2">2 batidas</option><option value="4" selected>4 batidas</option><option value="8">8 batidas</option></select></label>
+        </div>
+        <p class="guide-help">No modo fixo, o BPM conta semínimas em 2/4, 3/4 e 4/4; colcheias em 6/8. O modo detetado segue os tempos estimados no áudio e não usa o BPM fixo. Ajusta o primeiro tempo forte após ouvir.</p>
+        <p class="guide-help">Os ficheiros não acrescentam uma contagem antes do início: um aviso sem espaço para antecipação começa no segundo zero. Para tocar com a música, alinha os três ficheiros no mesmo ponto inicial.</p>
+        <div class="section-toolbar"><h3>Sequência dos avisos</h3><button id="addCue" type="button" class="btn btn-secondary">+ Adicionar aviso</button></div>
+        <datalist id="cueNames"><option value="Introdução"><option value="Estrofe"><option value="Refrão"><option value="Pré-refrão"><option value="Solo"><option value="Ponte"><option value="Interlúdio"><option value="Final"></datalist>
+        <div id="cueTimeline"></div>
+        <div class="export-grid">
+          <article class="export-card"><h3>Pista de click</h3><button id="generateClick" type="button" class="btn btn-primary">Gerar click</button><audio id="clickPreview" controls preload="metadata" class="hidden"></audio><a id="clickDownload" class="btn btn-secondary hidden">Descarregar click WAV</a></article>
+          <article class="export-card"><h3>Guia de voz PT-PT</h3><button id="generateCues" type="button" class="btn btn-primary">Gerar guia de voz</button><audio id="cuesPreview" controls preload="metadata" class="hidden"></audio><a id="cuesDownload" class="btn btn-secondary hidden">Descarregar guia WAV</a></article>
+        </div>
+        <div id="guideStatus" class="status hidden" role="status" aria-live="polite"></div>
+      </section>
     </section>
 
     <footer class="footer"><span>Score Studio · v{{ version }}</span><span>Transcrição musical assistida</span></footer>
@@ -141,5 +164,6 @@
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script src="/static/app.js"></script>
 <script src="/static/youtube.js"></script>
+<script src="/static/audio-guides.js?v={{ version }}"></script>
 </body>
 </html>
