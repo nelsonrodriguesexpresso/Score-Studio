@@ -13,6 +13,7 @@ import traceback
 import uuid
 from threading import Lock
 from audio_guides import generate_guide
+from playback_mix import source_cache, generate_mix
 
 from analyzer import analyze_audio
 from pdf_export import create_pdf
@@ -124,6 +125,7 @@ async def analyze(file: UploadFile = File(...), instrument: str = Form("bass5"))
         detected_title = audio_title(temp_path, Path(filename).stem)
         result = await run_in_threadpool(analyze_audio, temp_path, instrument)
         gc.collect()
+        result["playback_token"] = await run_in_threadpool(source_cache.save, temp_path, result["audio_duration"])
         result.update({
             "ok": True,
             "title": detected_title,
@@ -161,6 +163,7 @@ async def analyze_youtube(url: str = Form(...), instrument: str = Form("bass5"))
         )
         result = await run_in_threadpool(analyze_audio, audio_path, instrument)
         gc.collect()
+        result["playback_token"] = await run_in_threadpool(source_cache.save, audio_path, result["audio_duration"])
         result.update({
             "ok": True,
             "title": title,
@@ -239,5 +242,27 @@ def audio_guide(payload: dict = Body(...)):
         output.unlink(missing_ok=True)
         log_error()
         return JSONResponse({"ok": False, "error": "Não foi possível gerar a pista de áudio. Tenta novamente."}, status_code=500)
+    finally:
+        guide_lock.release()
+
+
+@app.post("/api/playback-mix")
+def playback_mix(payload: dict = Body(...)):
+    if not guide_lock.acquire(blocking=False):
+        return JSONResponse({"ok": False, "error": "Existe uma pista a ser gerada. Tenta novamente dentro de instantes."}, status_code=429)
+    output = GENERATED / f"mix_{uuid.uuid4().hex}.mp3"
+    try:
+        generate_mix(payload, output)
+        return FileResponse(str(output), media_type="audio/mpeg",
+                            filename=f"Mistura_{safe_filename(payload.get('title'))}.mp3",
+                            headers={"Cache-Control": "no-store"},
+                            background=BackgroundTask(lambda: output.unlink(missing_ok=True)))
+    except ValueError as exc:
+        output.unlink(missing_ok=True)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception:
+        output.unlink(missing_ok=True)
+        log_error()
+        return JSONResponse({"ok": False, "error": "Não foi possível preparar a mistura. Tenta novamente."}, status_code=500)
     finally:
         guide_lock.release()
