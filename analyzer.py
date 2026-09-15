@@ -109,7 +109,7 @@ def similarity(a, b):
     return sum(x == y for x, y in zip(a, b)) / len(a)
 
 
-def build_structure(chords):
+def build_structure(chords, chronological=False):
     if not chords:
         return []
     block = 8
@@ -150,14 +150,15 @@ def build_structure(chords):
         labels[last_cluster] = "FINAL"
     sections = []
     emitted = set()
-    for cluster_id in assignments:
-        if cluster_id in emitted:
+    for occurrence, cluster_id in enumerate(assignments):
+        if cluster_id in emitted and not chronological:
             continue
         emitted.add(cluster_id)
         sections.append({
             "name": labels[cluster_id],
-            "repeat": counts[cluster_id],
+            "repeat": 1 if chronological else counts[cluster_id],
             "chords": clusters[cluster_id],
+            **({"start_bar": occurrence * block} if chronological else {}),
         })
     return sections
 
@@ -177,7 +178,8 @@ def analyze_audio(path: Path, instrument: str):
     duration = float(librosa.get_duration(y=y, sr=sr))
     if duration < 1.0:
         raise ValueError("O áudio é demasiado curto para analisar.")
-    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=1024)
+    # Finer timing for audible click; keep the low-memory chroma resolution.
+    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=256)
     tempo = float(np.atleast_1d(tempo)[0])
     if not np.isfinite(tempo) or tempo <= 0:
         tempo = 120.0
@@ -187,12 +189,19 @@ def analyze_audio(path: Path, instrument: str):
         tempo /= 2
     chroma = librosa.feature.chroma_stft(y=y, sr=sr, n_fft=2048, hop_length=1024)
     key = estimate_key(chroma)
-    rows = bar_chroma_from_beats(chroma, beat_frames)
+    rows = bar_chroma_from_beats(chroma, beat_frames // 4)
+    beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=256).tolist()
+    bar_times = beat_times[0:len(beat_times) - 4:4] if len(beat_times) >= 8 else []
     if len(rows) < 4:
         rows = uniform_bar_chroma(chroma, duration, tempo)
+        bar_times = [i * duration / len(rows) for i in range(len(rows))]
     score_rows = [chord_scores(row) for row in rows]
     chords = smooth_chords(score_rows)
     sections = build_structure(chords)
+    cue_sections = [
+        {"name": s["name"], "start": round(bar_times[s["start_bar"]], 4)}
+        for s in build_structure(chords, chronological=True)
+    ]
     notes = dominant_notes(y, sr, instrument, chroma)
     beat_count = len(beat_frames)
     if beat_count >= 32 and duration >= 30:
@@ -206,6 +215,9 @@ def analyze_audio(path: Path, instrument: str):
         "key": key,
         "meter": "4/4",
         "duration": round(duration, 1),
+        "audio_duration": duration,
+        "beat_times": [round(t, 4) for t in beat_times if t < duration],
+        "cue_sections": cue_sections,
         "instrument": instrument,
         "detected_notes": notes,
         "sections": sections,
