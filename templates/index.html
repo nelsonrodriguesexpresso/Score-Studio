@@ -90,7 +90,7 @@
               <div class="youtube-content">
                 <strong>Link do YouTube</strong>
                 <input id="youtubeUrl" class="youtube-url" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
-                <span class="youtube-help">O áudio é usado apenas durante o processamento. Vídeos privados, restritos ou bloqueados podem não estar disponíveis.</span>
+                <span class="youtube-help">O áudio fica disponível temporariamente durante até 30 minutos para a audição conjunta. Vídeos privados, restritos ou bloqueados podem não estar disponíveis.</span>
               </div>
             </div>
           </div>
@@ -100,7 +100,7 @@
       <div id="audioPreview" class="audio-preview hidden"><div class="audio-meta"><strong id="audioName"></strong><span id="audioSize"></span></div><audio id="player" controls preload="metadata"></audio></div>
 
       <div class="analysis-action">
-        <div class="local-note"><strong>Processamento seguro</strong><span>A música é usada apenas durante a análise. Os ficheiros temporários são eliminados no final.</span></div>
+        <div class="local-note"><strong>Processamento seguro</strong><span>O áudio é guardado temporariamente durante até 30 minutos para ouvires a música com click e avisos. Depois é eliminado automaticamente.</span></div>
         <button id="go" class="btn btn-primary btn-large"><span>Analisar música</span><b>→</b></button>
       </div>
 
@@ -154,6 +154,19 @@
           <article class="export-card"><h3>Pista de click</h3><button id="generateClick" type="button" class="btn btn-primary">Gerar click</button><audio id="clickPreview" controls preload="metadata" class="hidden"></audio><a id="clickDownload" class="btn btn-secondary hidden">Descarregar click WAV</a></article>
           <article class="export-card"><h3>Guia de voz PT-PT</h3><button id="generateCues" type="button" class="btn btn-primary">Gerar guia de voz</button><audio id="cuesPreview" controls preload="metadata" class="hidden"></audio><a id="cuesDownload" class="btn btn-secondary hidden">Descarregar guia WAV</a></article>
         </div>
+      <article class="mix-panel">
+        <h3>Ouvir música + click + avisos</h3>
+        <p>Prepara as três pistas sincronizadas num único leitor. Ajusta os volumes e clica em «Preparar / atualizar mistura» para aplicar. Não é preciso gerar primeiro os WAV separados.</p>
+        <div class="guide-settings">
+          <label class="field"><span>Música (%)</span><input id="mixMusic" type="number" min="0" max="100" value="60" required></label>
+          <label class="field"><span>Click (%)</span><input id="mixClick" type="number" min="0" max="100" value="80" required></label>
+          <label class="field"><span>Avisos (%)</span><input id="mixCues" type="number" min="0" max="100" value="100" required></label>
+        </div>
+        <button id="generateMix" class="btn btn-primary" type="button">Preparar / atualizar mistura</button>
+        <audio id="mixPreview" controls preload="metadata" class="hidden" aria-label="Música, click e avisos sincronizados"></audio>
+        <a id="mixDownload" class="btn btn-secondary hidden">Descarregar mistura MP3</a>
+        <p class="guide-help">Podes pausar e avançar no leitor: as três pistas mantêm-se alinhadas. O áudio original fica disponível até 30 minutos após a análise; se expirar, analisa novamente.</p>
+      </article>
         <div id="guideStatus" class="status hidden" role="status" aria-live="polite"></div>
       </section>
     </section>
