@@ -178,8 +178,10 @@ def analyze_audio(path: Path, instrument: str):
     duration = float(librosa.get_duration(y=y, sr=sr))
     if duration < 1.0:
         raise ValueError("O áudio é demasiado curto para analisar.")
-    # Finer timing for audible click; keep the low-memory chroma resolution.
-    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=256)
+    # Fine click timing with a short FFT: avoid quadrupling peak memory on long songs.
+    onset = librosa.onset.onset_strength(y=y, sr=sr, hop_length=256, n_fft=512)
+    tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset, sr=sr, hop_length=256)
+    del onset
     tempo = float(np.atleast_1d(tempo)[0])
     if not np.isfinite(tempo) or tempo <= 0:
         tempo = 120.0
