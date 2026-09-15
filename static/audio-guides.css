@@ -11,3 +11,5 @@
 @media(max-width:380px){.guide-settings{grid-template-columns:1fr}}
 
 .guide-panel .export-card{grid-template-columns:minmax(0,1fr)}
+.mix-panel{margin-top:24px;padding:20px;border:1px solid #355344;border-radius:16px;background:#0b1911}
+.mix-panel audio{display:block}
