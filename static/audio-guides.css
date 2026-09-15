@@ -9,3 +9,5 @@
 .guide-panel a{text-align:center;text-decoration:none;margin-top:12px}
 @media(max-width:700px){.guide-settings{grid-template-columns:repeat(2,minmax(0,1fr))}.guide-cue-row{gap:8px;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) 32px}}
 @media(max-width:380px){.guide-settings{grid-template-columns:1fr}}
+
+.guide-panel .export-card{grid-template-columns:minmax(0,1fr)}
