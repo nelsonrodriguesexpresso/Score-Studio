@@ -13,7 +13,7 @@ import traceback
 import uuid
 from threading import Lock
 from audio_guides import generate_guide
-from playback_mix import source_cache, generate_mix
+from playback_mix import source_cache, mixer_cache, generate_mix
 
 from analyzer import analyze_audio
 from pdf_export import create_pdf
@@ -266,3 +266,34 @@ def playback_mix(payload: dict = Body(...)):
         return JSONResponse({"ok": False, "error": "Não foi possível preparar a mistura. Tenta novamente."}, status_code=500)
     finally:
         guide_lock.release()
+
+
+@app.post("/api/mixer-session")
+def mixer_session(payload: dict = Body(...)):
+    if not guide_lock.acquire(blocking=False):
+        return JSONResponse({"error": "Existe uma pista a ser gerada. Tenta novamente dentro de instantes."}, status_code=429)
+    output = GENERATED / f"desk_{uuid.uuid4().hex}.wav"
+    try:
+        generate_mix(payload, output, multichannel=True)
+        token = mixer_cache.save(output, 0)
+        if not token:
+            raise ValueError("A música excede o limite da mesa de mistura.")
+        return {"url": f"/api/mixer-audio/{token}"}
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception:
+        log_error()
+        return JSONResponse({"error": "Não foi possível preparar a mesa de mistura."}, status_code=500)
+    finally:
+        output.unlink(missing_ok=True)
+        guide_lock.release()
+
+
+@app.get("/api/mixer-audio/{token}")
+def mixer_audio(token: str):
+    with mixer_cache.lock:
+        mixer_cache.prune()
+        item = mixer_cache.entries.get(token)
+        if not item:
+            return JSONResponse({"error": "A sessão expirou. Prepara novamente a mesa."}, status_code=404)
+        return FileResponse(str(item[0]), media_type="audio/wav", headers={"Cache-Control": "no-store"})
