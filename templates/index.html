@@ -155,17 +155,44 @@
           <article class="export-card"><h3>Guia de voz PT-PT</h3><button id="generateCues" type="button" class="btn btn-primary">Gerar guia de voz</button><audio id="cuesPreview" controls preload="metadata" class="hidden"></audio><a id="cuesDownload" class="btn btn-secondary hidden">Descarregar guia WAV</a></article>
         </div>
       <article class="mix-panel">
-        <h3>Ouvir música + click + avisos</h3>
-        <p>Prepara as três pistas sincronizadas num único leitor. Ajusta os volumes e clica em «Preparar / atualizar mistura» para aplicar. Não é preciso gerar primeiro os WAV separados.</p>
-        <div class="guide-settings">
-          <label class="field"><span>Música (%)</span><input id="mixMusic" type="number" min="0" max="100" value="60" required></label>
-          <label class="field"><span>Click (%)</span><input id="mixClick" type="number" min="0" max="100" value="80" required></label>
-          <label class="field"><span>Avisos (%)</span><input id="mixCues" type="number" min="0" max="100" value="100" required></label>
+        <h3>Mesa de mistura</h3>
+        <p>Ouve a música, o click e os avisos em conjunto. Move os faders durante a reprodução: o volume muda imediatamente.</p>
+        <div class="mixer-desk">
+          <div class="mixer-strip ">
+            <label for="mixMusic">Música</label>
+            <output id="mixMusicValue" for="mixMusic">60%</output>
+            <input id="mixMusic" type="range" min="0" max="100" step="1" value="60" aria-label="Volume música" aria-orientation="vertical">
+            <button id="muteMusic" class="mixer-mute" type="button" aria-pressed="false" aria-label="Silenciar música">MUTE</button>
+          </div>
+          <div class="mixer-strip ">
+            <label for="mixClick">Click</label>
+            <output id="mixClickValue" for="mixClick">80%</output>
+            <input id="mixClick" type="range" min="0" max="100" step="1" value="80" aria-label="Volume click" aria-orientation="vertical">
+            <button id="muteClick" class="mixer-mute" type="button" aria-pressed="false" aria-label="Silenciar click">MUTE</button>
+          </div>
+          <div class="mixer-strip ">
+            <label for="mixCues">Avisos</label>
+            <output id="mixCuesValue" for="mixCues">100%</output>
+            <input id="mixCues" type="range" min="0" max="100" step="1" value="100" aria-label="Volume avisos" aria-orientation="vertical">
+            <button id="muteCues" class="mixer-mute" type="button" aria-pressed="false" aria-label="Silenciar avisos">MUTE</button>
+          </div>
+          <div class="mixer-strip mixer-master">
+            <label for="mixMaster">Geral</label>
+            <output id="mixMasterValue" for="mixMaster">100%</output>
+            <input id="mixMaster" type="range" min="0" max="100" step="1" value="100" aria-label="Volume geral" aria-orientation="vertical">
+            <button id="muteMaster" class="mixer-mute" type="button" aria-pressed="false" aria-label="Silenciar geral">MUTE</button>
+          </div>
         </div>
-        <button id="generateMix" class="btn btn-primary" type="button">Preparar / atualizar mistura</button>
-        <audio id="mixPreview" controls preload="metadata" class="hidden" aria-label="Música, click e avisos sincronizados"></audio>
+        <button id="generateMix" class="btn btn-primary" type="button">Preparar mesa</button>
+        <div id="mixerTransport" class="hidden">
+          <button id="mixerPlay" class="btn btn-primary" type="button">Reproduzir</button>
+          <label class="field"><span>Posição na música</span><input id="mixerSeek" type="range" min="0" max="100" step="0.1" value="0"></label>
+          <output id="mixerTime">0:00 / 0:00</output>
+        </div>
+        <audio id="mixPreview" preload="metadata" class="hidden" aria-label="Música, click e avisos sincronizados"></audio>
+        <button id="exportMix" class="btn btn-secondary" type="button">Exportar mistura MP3</button>
         <a id="mixDownload" class="btn btn-secondary hidden">Descarregar mistura MP3</a>
-        <p class="guide-help">Podes pausar e avançar no leitor: as três pistas mantêm-se alinhadas. O áudio original fica disponível até 30 minutos após a análise; se expirar, analisa novamente.</p>
+        <p class="guide-help">MUTE silencia uma pista; Geral controla o conjunto. Pausar e avançar mantém as pistas alinhadas. A exportação usa os volumes e silêncios atuais. Áudio temporário disponível até 30 minutos.</p>
       </article>
         <div id="guideStatus" class="status hidden" role="status" aria-live="polite"></div>
       </section>
@@ -177,6 +204,7 @@
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script src="/static/app.js"></script>
 <script src="/static/youtube.js"></script>
+<script src="/static/live-mixer.js?v={{ version }}"></script>
 <script src="/static/audio-guides.js?v={{ version }}"></script>
 </body>
 </html>

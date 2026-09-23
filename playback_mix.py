@@ -76,12 +76,13 @@ class SourceCache:
 
 
 source_cache = SourceCache()
+mixer_cache = SourceCache(max_bytes=768 * 1024 * 1024)
 
 
-def generate_mix(payload, destination):
+def generate_mix(payload, destination, multichannel=False):
     levels = [number(payload.get(key, default), key, 0, 100) / 100
               for key, default in [("music_volume", 60), ("click_volume", 80), ("cues_volume", 100)]]
-    if not any(levels):
+    if not multichannel and not any(levels):
         raise ValueError("Aumenta o volume de pelo menos uma pista.")
     with TemporaryDirectory(prefix="score-mix-") as folder:
         folder = Path(folder)
@@ -92,8 +93,14 @@ def generate_mix(payload, destination):
             generate_guide(dict(data, kind="cues"), folder / "cues.wav")
             filters = ";".join(f"[{i}:a]asetpts=PTS-STARTPTS,volume={level}[a{i}]" for i, level in enumerate(levels))
             filters += ";[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,alimiter=limit=0.95:level=0:latency=1[out]"
+            if multichannel:
+                filters = (f"[0:a]asetpts=PTS-STARTPTS,aresample=44100,aformat=channel_layouts=stereo,apad,atrim=duration={duration}[music];"
+                           "[1:a]asetpts=PTS-STARTPTS,aresample=44100[click];"
+                           "[2:a]asetpts=PTS-STARTPTS,aresample=44100[cues];"
+                           "[music][click][cues]join=inputs=3:channel_layout=quad:map=0.0-FL|0.1-FR|1.0-BL|2.0-BR[out]")
+            codec = ["-ac", "4", "-channel_layout", "quad", "-c:a", "pcm_s16le"] if multichannel else ["-ac", "2", "-c:a", "libmp3lame", "-b:a", "192k"]
             subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-threads", "1",
                             "-i", str(source), "-i", str(folder / "click.wav"), "-i", str(folder / "cues.wav"),
                             "-filter_complex_threads", "1", "-filter_complex", filters, "-map", "[out]",
-                            "-t", str(duration), "-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "192k",
+                            "-t", str(duration), "-ar", "44100", *codec,
                             str(destination)], check=True, timeout=120, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
