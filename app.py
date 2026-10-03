@@ -297,3 +297,7 @@ def mixer_audio(token: str):
         if not item:
             return JSONResponse({"error": "A sessão expirou. Prepara novamente a mesa."}, status_code=404)
         return FileResponse(str(item[0]), media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+from muscriptor_integration import router as muscriptor_router
+app.include_router(muscriptor_router)
