@@ -45,3 +45,57 @@ function payload(kind){syncMetadata();return {kind,title:analysis.title,instrume
 async function exportPdf(kind){if(!analysis)return;const btn=kind==="score"?$("pdfScore"):$("pdfChart");btn.disabled=true;setExportStatus("A criar o PDF…");try{const response=await fetch("/api/export",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload(kind))});if(!response.ok){const raw=await response.text();let msg=raw;try{const data=JSON.parse(raw);msg=(data.error||"Erro")+(data.detail?` ${data.detail}`:"");}catch{}throw new Error(msg);}const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=(kind==="score"?"Pauta_":"Partitura_Acordes_")+(analysis.title||"Música")+".pdf";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);setExportStatus("PDF criado com sucesso.","success");toast("PDF pronto");}catch(error){setExportStatus(`Erro: ${error.message}`,"error");}finally{btn.disabled=false;}}
 $("pdfScore").onclick=()=>exportPdf("score");
 $("pdfChart").onclick=()=>exportPdf("chart");
+
+// MuScriptor local worker integration. The browser never receives the secret key;
+// it talks only to Score Studio, which forwards the audio server-side.
+(function setupMuScriptor(){
+  const action=document.querySelector(".analysis-action");
+  if(!action)return;
+  const wrap=document.createElement("div");
+  wrap.style.display="flex";
+  wrap.style.flexDirection="column";
+  wrap.style.gap="8px";
+  wrap.style.alignItems="stretch";
+  wrap.innerHTML=`<button id="muscriptorMidi" type="button" class="btn btn-secondary btn-large"><span>Gerar MIDI com IA</span><b>♪</b></button><small id="muscriptorWorkerStatus" style="text-align:center;opacity:.75">A verificar MuScriptor…</small>`;
+  action.appendChild(wrap);
+
+  const button=$("muscriptorMidi");
+  const status=$("muscriptorWorkerStatus");
+
+  async function refreshHealth(){
+    try{
+      const response=await fetch("/api/muscriptor/health",{cache:"no-store"});
+      const data=await response.json();
+      if(response.ok&&data.online){status.textContent="MuScriptor disponível no teu computador";status.style.color="#6ee7a8";button.disabled=false;}
+      else{status.textContent="MuScriptor offline · liga o computador/serviço";status.style.color="#f3b6b6";button.disabled=true;}
+    }catch{status.textContent="MuScriptor offline";status.style.color="#f3b6b6";button.disabled=true;}
+  }
+
+  button.onclick=async()=>{
+    if(!selectedFile){setStatus("Escolhe primeiro uma música para o MuScriptor.","error");return;}
+    button.disabled=true;
+    const oldText=button.querySelector("span").textContent;
+    button.querySelector("span").textContent="A transcrever…";
+    status.textContent="MuScriptor está a trabalhar no teu computador. Mantém-no ligado; pode demorar vários minutos.";
+    status.style.color="";
+    setStatus("A gerar a transcrição MIDI com o MuScriptor. Mantém esta página aberta.");
+    const fd=new FormData();fd.append("file",selectedFile);
+    try{
+      const response=await fetch("/api/muscriptor/midi",{method:"POST",body:fd});
+      if(!response.ok){const raw=await response.text();let msg=raw;try{const data=JSON.parse(raw);msg=data.error||data.detail||raw;}catch{}throw new Error(msg||`HTTP ${response.status}`);}
+      const blob=await response.blob();
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      const base=(selectedFile.name||"transcricao").replace(/\.[^.]+$/,"");
+      a.href=url;a.download=`MuScriptor_${base}.mid`;document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),3000);
+      status.textContent="Transcrição concluída · MIDI descarregado";status.style.color="#6ee7a8";
+      setStatus("MuScriptor concluiu a transcrição MIDI.","success");
+      toast("MIDI MuScriptor pronto");
+    }catch(error){status.textContent=`Erro: ${error.message}`;status.style.color="#f3b6b6";setStatus(`MuScriptor: ${error.message}`,"error");}
+    finally{button.querySelector("span").textContent=oldText;await refreshHealth();}
+  };
+
+  refreshHealth();
+  setInterval(refreshHealth,60000);
+})();
