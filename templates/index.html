@@ -38,7 +38,7 @@
         <h1>Da música à pauta.<br><em>Mais rápido. Mais claro.</em></h1>
         <p>Carrega um ficheiro ou cola um link do YouTube. O Score Studio deteta BPM, tonalidade, acordes e estrutura, permite rever o resultado e gera documentos prontos a usar.</p>
         <div class="hero-badges">
-          <span>Baixo 5 cordas</span><span>Guitarra</span><span>Piano / Teclado</span><span>YouTube</span><span>PDF A4</span>
+          <span>Baixo 5 cordas</span><span>Guitarra</span><span>Piano / Teclado</span><span>YouTube</span><span>PDF A4</span><span>MuScriptor</span>
         </div>
       </div>
       <div class="hero-visual" aria-hidden="true">
@@ -50,10 +50,11 @@
       </div>
     </section>
 
-    <nav class="stepper" aria-label="Fluxo de trabalho">
+    <nav class="stepper" aria-label="Fluxo de trabalho" style="grid-template-columns:repeat(4,1fr)">
       <button class="step active" data-target="analysisCard"><b>01</b><span><small>Primeiro</small>Analisar</span></button>
       <button class="step" data-target="reviewCard"><b>02</b><span><small>Depois</small>Rever</span></button>
       <button class="step" data-target="exportCard"><b>03</b><span><small>Final</small>Exportar</span></button>
+      <button class="step" data-target="muscriptorCard"><b>04</b><span><small>IA</small>MuScriptor</span></button>
     </nav>
 
     <section id="analysisCard" class="panel main-panel">
@@ -196,6 +197,28 @@
       </article>
         <div id="guideStatus" class="status hidden" role="status" aria-live="polite"></div>
       </section>
+    </section>
+
+    <section id="muscriptorCard" class="panel">
+      <div class="panel-heading">
+        <div><span class="kicker">TRANSCRIÇÃO IA MULTI-INSTRUMENTO</span><h2>MuScriptor</h2><p>Transforma uma gravação em MIDI e visualização de notas usando o MuScriptor.</p></div>
+        <span class="privacy-badge"><i></i> Hugging Face ZeroGPU</span>
+      </div>
+      <div style="border:1px solid rgba(255,255,255,.07);background:#08110d;border-radius:16px;padding:16px;margin-bottom:14px">
+        <strong style="display:block;font-size:13px;margin-bottom:7px">Áudio → MIDI dentro do Score Studio</strong>
+        <span style="display:block;color:var(--muted);font-size:10px;line-height:1.55">Esta ferramenta usa o espaço público do MuScriptor no Hugging Face. O processamento pesado fica fora do Railway, por isso não sobrecarrega o Score Studio. Se houver fila de GPU, a espera pertence ao serviço externo.</span>
+      </div>
+      <iframe
+        title="MuScriptor Music Transcription"
+        src="https://hugging-apps-muscriptor-music-transcription.hf.space"
+        loading="lazy"
+        allow="clipboard-read; clipboard-write; microphone"
+        style="width:100%;height:980px;border:1px solid rgba(255,255,255,.08);border-radius:16px;background:#0b0b0b"
+      ></iframe>
+      <div class="analysis-action" style="margin-top:14px">
+        <div class="local-note"><strong>Motor externo</strong><span>Os resultados são gerados pelo MuScriptor no Hugging Face. O Score Studio continua independente e as funções atuais não são alteradas.</span></div>
+        <a class="btn btn-secondary" href="https://huggingface.co/spaces/hugging-apps/muscriptor-music-transcription" target="_blank" rel="noopener noreferrer">Abrir em janela separada</a>
+      </div>
     </section>
 
     <footer class="footer"><span>Score Studio · v{{ version }}</span><span>Transcrição musical assistida</span></footer>
