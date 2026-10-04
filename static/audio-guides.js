@@ -128,3 +128,189 @@
   window.addEventListener("beforeunload", clearAudio);
   accents();
 })();
+
+/* PWA install + update controls. */
+(() => {
+  const topActions = document.querySelector(".top-actions");
+  if (!topActions) return;
+
+  const currentVersion = (document.querySelector(".version")?.textContent || "").replace(/^v/i, "").trim();
+  let deferredInstallPrompt = null;
+  let latestVersion = null;
+  let updateAvailable = false;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    .pwa-action{border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:inherit;border-radius:999px;padding:8px 12px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:.2s ease}
+    .pwa-action:hover{transform:translateY(-1px);background:rgba(255,255,255,.11)}
+    .pwa-action.update-ready{border-color:#59e8a9;background:rgba(89,232,169,.13);color:#9af6c8}
+    .pwa-action:disabled{opacity:.58;cursor:default;transform:none}
+    .pwa-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.65);display:grid;place-items:center;padding:20px;z-index:9999}
+    .pwa-modal{width:min(520px,100%);background:#0d1713;border:1px solid rgba(255,255,255,.13);border-radius:20px;padding:24px;box-shadow:0 28px 80px rgba(0,0,0,.42);color:#eef8f3}
+    .pwa-modal h3{margin:0 0 10px;font-size:21px}.pwa-modal p{margin:8px 0;color:#b7c7bf;line-height:1.55}.pwa-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+    .pwa-modal .pwa-primary{background:#59e8a9;color:#07110d;border:0;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer}.pwa-modal .pwa-secondary{background:transparent;color:#eaf5ef;border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}
+    @media(max-width:760px){.top-actions{gap:6px;flex-wrap:wrap;justify-content:flex-end}.pwa-action{padding:7px 9px;font-size:11px}}
+  `;
+  document.head.appendChild(style);
+
+  const manifest = document.createElement("link");
+  manifest.rel = "manifest";
+  manifest.href = `/manifest.webmanifest?v=${encodeURIComponent(currentVersion || "latest")}`;
+  document.head.appendChild(manifest);
+
+  const mobileCapable = document.createElement("meta");
+  mobileCapable.name = "mobile-web-app-capable";
+  mobileCapable.content = "yes";
+  document.head.appendChild(mobileCapable);
+
+  const installButton = document.createElement("button");
+  installButton.type = "button";
+  installButton.className = "pwa-action";
+  installButton.textContent = "⬇ Instalar no ambiente de trabalho";
+
+  const updateButton = document.createElement("button");
+  updateButton.type = "button";
+  updateButton.className = "pwa-action";
+  updateButton.textContent = "↻ Verificar atualização";
+
+  topActions.prepend(updateButton);
+  topActions.prepend(installButton);
+
+  function modal(title, paragraphs, actions = []) {
+    const backdrop = document.createElement("div");
+    backdrop.className = "pwa-modal-backdrop";
+    const card = document.createElement("div");
+    card.className = "pwa-modal";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    card.appendChild(heading);
+    paragraphs.forEach((text) => {
+      const p = document.createElement("p");
+      p.textContent = text;
+      card.appendChild(p);
+    });
+    const actionBox = document.createElement("div");
+    actionBox.className = "pwa-modal-actions";
+    actions.forEach((action) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = action.primary ? "pwa-primary" : "pwa-secondary";
+      button.textContent = action.label;
+      button.onclick = () => {
+        if (action.run) action.run();
+        if (action.close !== false) backdrop.remove();
+      };
+      actionBox.appendChild(button);
+    });
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "pwa-secondary";
+    close.textContent = "Fechar";
+    close.onclick = () => backdrop.remove();
+    actionBox.appendChild(close);
+    card.appendChild(actionBox);
+    backdrop.appendChild(card);
+    backdrop.addEventListener("click", (event) => { if (event.target === backdrop) backdrop.remove(); });
+    document.body.appendChild(backdrop);
+  }
+
+  function installedMode() {
+    return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  }
+
+  function refreshInstallState() {
+    if (installedMode()) {
+      installButton.textContent = "✓ Instalado no ambiente de trabalho";
+      installButton.disabled = true;
+    } else {
+      installButton.textContent = "⬇ Instalar no ambiente de trabalho";
+      installButton.disabled = false;
+    }
+  }
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    refreshInstallState();
+  });
+
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    refreshInstallState();
+  });
+
+  installButton.addEventListener("click", async () => {
+    if (installedMode()) return refreshInstallState();
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      refreshInstallState();
+      return;
+    }
+    modal(
+      "Instalar o Score Studio",
+      [
+        "Se o botão de instalação do navegador ainda não estiver disponível, usa o menu do Chrome/Edge e escolhe “Instalar Score Studio” ou “Criar atalho”.",
+        "Depois de instalado, o Score Studio abre numa janela própria e fica disponível a partir do Ambiente de Trabalho/Menu Iniciar."
+      ]
+    );
+  });
+
+  async function checkUpdates(manual = false) {
+    updateButton.disabled = true;
+    updateButton.textContent = "↻ A verificar…";
+    try {
+      const response = await fetch(`/api/update-status?t=${Date.now()}`, {cache: "no-store"});
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Falha ao verificar atualização.");
+
+      latestVersion = data.latest_version;
+      updateAvailable = Boolean(data.update_available);
+      updateButton.classList.toggle("update-ready", updateAvailable);
+      updateButton.textContent = updateAvailable
+        ? `● Nova versão v${latestVersion}`
+        : `✓ Atualizado v${data.current_version}`;
+
+      if (updateAvailable && manual) showUpdateInfo();
+      if (!updateAvailable) {
+        setTimeout(() => {
+          if (!updateAvailable) updateButton.textContent = "↻ Verificar atualização";
+        }, 3500);
+      }
+    } catch (error) {
+      updateButton.textContent = "⚠ Não foi possível verificar";
+      if (manual) modal("Verificação de atualização", [error.message || "Não foi possível verificar atualizações neste momento."]);
+      setTimeout(() => { updateButton.textContent = "↻ Verificar atualização"; }, 4000);
+    } finally {
+      updateButton.disabled = false;
+    }
+  }
+
+  function showUpdateInfo() {
+    modal(
+      `Nova versão v${latestVersion} disponível`,
+      [
+        `Estás a usar a versão v${currentVersion || "atual"}. Existe uma versão mais recente no GitHub.`,
+        "Neste computador, a atualização é feita a partir do instalador local para manter o MuScriptor e o arranque automático intactos."
+      ],
+      [{
+        label: "Abrir versão no GitHub",
+        primary: true,
+        run: () => window.open("https://github.com/nelsonrodriguesexpresso/Score-Studio/tree/feature/muscriptor-local-worker", "_blank", "noopener")
+      }]
+    );
+  }
+
+  updateButton.addEventListener("click", () => {
+    if (updateAvailable) showUpdateInfo();
+    else checkUpdates(true);
+  });
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register(`/service-worker.js?v=${encodeURIComponent(currentVersion || "latest")}`, {scope: "/"}).catch(() => undefined);
+  }
+
+  refreshInstallState();
+  setTimeout(() => checkUpdates(false), 1800);
+})();
