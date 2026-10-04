@@ -1,0 +1,19 @@
+{
+  "name": "Score Studio",
+  "short_name": "Score Studio",
+  "description": "Transcrição musical assistida, análise, pauta, click, guia e MuScriptor.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#07110d",
+  "theme_color": "#07110d",
+  "icons": [
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
