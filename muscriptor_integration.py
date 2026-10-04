@@ -3,14 +3,16 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, File, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 router = APIRouter()
 
+BASE = Path(__file__).resolve().parent
 WORKER_URL = os.getenv("MUSCRIPTOR_WORKER_URL", "").rstrip("/")
 WORKER_KEY = os.getenv("MUSCRIPTOR_WORKER_KEY", "")
 MAX_AUDIO_BYTES = 120 * 1024 * 1024
 SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg"}
+LATEST_VERSION_URL = "https://raw.githubusercontent.com/nelsonrodriguesexpresso/Score-Studio/feature/muscriptor-local-worker/VERSION.txt"
 
 
 def _configured() -> bool:
@@ -19,6 +21,72 @@ def _configured() -> bool:
 
 def _worker_headers() -> dict[str, str]:
     return {"X-Score-Studio-Key": WORKER_KEY}
+
+
+def _current_version() -> str:
+    try:
+        return (BASE / "VERSION.txt").read_text(encoding="utf-8").strip()
+    except Exception:
+        return "0.0.0"
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in value.strip().split("."))
+    except Exception:
+        return (0,)
+
+
+@router.get("/manifest.webmanifest", include_in_schema=False)
+def pwa_manifest():
+    return FileResponse(
+        BASE / "static" / "manifest.webmanifest",
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/service-worker.js", include_in_schema=False)
+def pwa_service_worker():
+    return FileResponse(
+        BASE / "static" / "service-worker.js",
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Service-Worker-Allowed": "/",
+        },
+    )
+
+
+@router.get("/api/update-status")
+async def update_status():
+    current = _current_version()
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            response = await client.get(
+                LATEST_VERSION_URL,
+                headers={"Cache-Control": "no-cache"},
+                params={"t": str(int(__import__("time").time()))},
+            )
+        response.raise_for_status()
+        latest = response.text.strip()
+        return {
+            "ok": True,
+            "current_version": current,
+            "latest_version": latest,
+            "update_available": _version_tuple(latest) > _version_tuple(current),
+        }
+    except Exception:
+        return JSONResponse(
+            {
+                "ok": False,
+                "current_version": current,
+                "latest_version": None,
+                "update_available": False,
+                "error": "Não foi possível verificar atualizações neste momento.",
+            },
+            status_code=503,
+        )
 
 
 @router.get("/api/muscriptor/health")
