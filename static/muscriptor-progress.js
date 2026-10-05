@@ -13,6 +13,14 @@
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const makeId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  function clientId(){
+    const key = "scorestudio_muscriptor_client_id";
+    try{
+      let value = localStorage.getItem(key);
+      if(!value){ value = makeId(); localStorage.setItem(key, value); }
+      return value;
+    }catch{ return "browser-" + makeId(); }
+  }
 
   function ensureUi(button){
     let box = document.getElementById("muscriptorAiProgress");
@@ -76,6 +84,7 @@
       }
 
       const jobId = makeId();
+      const browserClientId = clientId();
       const stopRef = {stop:false};
       const oldText = button.querySelector("span")?.textContent || "Gerar MIDI com IA";
       button.disabled = true;
@@ -86,6 +95,7 @@
       const fd = new FormData();
       fd.append("file", file);
       fd.append("job_id", jobId);
+      fd.append("client_id", browserClientId);
       const poller = poll(jobId, stopRef);
 
       try{
