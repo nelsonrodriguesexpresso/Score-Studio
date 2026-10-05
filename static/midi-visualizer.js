@@ -1,210 +1,49 @@
-/* Score Studio MIDI visualizer: piano-roll inspired by MuScriptor's graphical result view. */
+/* Score Studio MIDI PRO: piano roll, transport, solo/mute, mini-mixer and metronome. */
 (() => {
-  const COLORS = ["#59e8a9", "#7ab8ff", "#ff9b73", "#d58cff", "#ffd166", "#6fe7e1", "#ff7aa2", "#b7e36a"];
-  const GM_FAMILIES = ["Piano", "Percussão cromática", "Órgão", "Guitarra", "Baixo", "Cordas", "Ensemble", "Metais", "Palhetas", "Sopros", "Sintetizador", "Synth Pad", "Efeitos", "Étnico", "Percussão", "Efeitos sonoros"];
-  let current = null;
-  let blobUrl = null;
-  let hiddenTracks = new Set();
-  let pxPerSecond = 58;
+  if (window.__scoreStudioMidiVisualizerLoaded) return;
+  window.__scoreStudioMidiVisualizerLoaded = true;
 
-  const style = document.createElement("style");
-  style.textContent = `
-    .midi-lab{margin-top:18px;border:1px solid rgba(255,255,255,.11);border-radius:20px;background:linear-gradient(145deg,rgba(9,22,17,.94),rgba(6,15,12,.96));overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.18)}
-    .midi-lab-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:20px 22px;border-bottom:1px solid rgba(255,255,255,.08)}
-    .midi-lab-head h3{margin:3px 0 5px;font-size:20px}.midi-lab-head p{margin:0;color:#a8bbb1;max-width:720px;line-height:1.45}.midi-kicker{font-size:11px;letter-spacing:.16em;color:#59e8a9;font-weight:800}
-    .midi-state{display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;color:#b8c8c0;white-space:nowrap}.midi-state i{width:7px;height:7px;border-radius:50%;background:#84938c}.midi-state.ready{color:#9af6c8;border-color:rgba(89,232,169,.26);background:rgba(89,232,169,.08)}.midi-state.ready i{background:#59e8a9;box-shadow:0 0 0 4px rgba(89,232,169,.1)}
-    .midi-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.07);flex-wrap:wrap}.midi-actions-left,.midi-actions-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.midi-tool{border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.05);color:#eaf5ef;border-radius:10px;padding:8px 10px;font:inherit;font-size:12px;font-weight:750;cursor:pointer}.midi-tool:hover{background:rgba(255,255,255,.09)}.midi-tool.primary{background:#59e8a9;color:#07110d;border-color:#59e8a9}.midi-tool[disabled]{opacity:.45;cursor:default}.midi-stats{font-size:12px;color:#9fb0a8}
-    .midi-legend{display:flex;gap:7px;flex-wrap:wrap;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.07)}.midi-track-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.045);color:#dce8e2;border-radius:999px;padding:7px 10px;font:inherit;font-size:11px;font-weight:750;cursor:pointer}.midi-track-chip i{width:9px;height:9px;border-radius:3px;background:var(--track-color)}.midi-track-chip.off{opacity:.42;text-decoration:line-through}
-    .midi-roll-wrap{position:relative;overflow:auto;max-height:520px;background:#07100d}.midi-roll-wrap canvas{display:block}.midi-empty{padding:38px 24px;text-align:center;color:#8fa098}.midi-empty strong{display:block;color:#dce8e2;font-size:16px;margin-bottom:6px}.midi-empty span{font-size:13px;line-height:1.5}
-    .midi-hint{padding:10px 18px 14px;color:#83958c;font-size:11px;line-height:1.5}.midi-generate-slot{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.midi-generate-slot > div{min-width:220px}
-    @media(max-width:760px){.midi-lab-head{padding:16px;flex-direction:column}.midi-actions{padding:12px}.midi-legend{padding:10px 12px}.midi-roll-wrap{max-height:430px}.midi-state{align-self:flex-start}}
-  `;
+  const COLORS = ["#59e8a9","#7ab8ff","#ff9b73","#d58cff","#ffd166","#6fe7e1","#ff7aa2","#b7e36a","#ffa94d","#8ce99a"];
+  const GM_FAMILIES = ["Piano","Percussão cromática","Órgão","Guitarra","Baixo","Cordas","Ensemble","Metais","Palhetas","Sopros","Sintetizador","Synth Pad","Efeitos","Étnico","Percussão","Efeitos sonoros"];
+  const ICONS = {"Piano":"🎹","Percussão cromática":"🔔","Órgão":"🎹","Guitarra":"🎸","Baixo":"🎸","Cordas":"🎻","Ensemble":"🎻","Metais":"🎺","Palhetas":"🎷","Sopros":"🪈","Sintetizador":"🎛","Synth Pad":"🎛","Efeitos":"✨","Étnico":"🪕","Percussão":"🥁","Efeitos sonoros":"🔊"};
+  const state = {midi:null,blobUrl:null,hiddenTracks:new Set(),mutedTracks:new Set(),soloTracks:new Set(),trackVolumes:[],pxPerSecond:60,currentSec:0,isPlaying:false,loop:false,metronome:false,speed:1,playbackStartSec:0,playbackStartAudioTime:0,audioCtx:null,masterGain:null,trackGains:[],scheduledVoices:[],scheduledClicks:[],raf:0};
+
+  const style=document.createElement("style");
+  style.textContent=`
+    .midi-lab{margin-top:18px;border:1px solid rgba(255,255,255,.11);border-radius:22px;background:linear-gradient(180deg,rgba(11,26,21,.97),rgba(6,15,12,.99));overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.24)}
+    .midi-lab-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:22px;border-bottom:1px solid rgba(255,255,255,.08)}
+    .midi-kicker{font-size:11px;letter-spacing:.16em;color:#59e8a9;font-weight:800}.midi-lab-head h3{margin:4px 0 6px;font-size:21px}.midi-lab-head p{margin:0;color:#a8bbb1;max-width:760px;line-height:1.45}
+    .midi-state{display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800;color:#b8c8c0;white-space:nowrap}.midi-state i{width:7px;height:7px;border-radius:50%;background:#84938c}.midi-state.ready{color:#9af6c8;border-color:rgba(89,232,169,.26);background:rgba(89,232,169,.08)}.midi-state.ready i{background:#59e8a9;box-shadow:0 0 0 4px rgba(89,232,169,.1)}
+    .midi-shell{display:grid;grid-template-columns:minmax(330px,390px) minmax(0,1fr);min-height:470px}.midi-side{border-right:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01))}.midi-main{display:flex;flex-direction:column;min-width:0}
+    .midi-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.07)}.midi-toolbar-left,.midi-toolbar-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .midi-btn{border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.05);color:#eaf5ef;border-radius:12px;padding:8px 12px;font:inherit;font-size:12px;font-weight:780;cursor:pointer;transition:.18s ease}.midi-btn:hover{background:rgba(255,255,255,.09);transform:translateY(-1px)}.midi-btn.primary{background:#59e8a9;color:#07110d;border-color:#59e8a9}.midi-btn.ghost{background:transparent}.midi-btn.active{border-color:#59e8a9;background:rgba(89,232,169,.12);color:#b8ffe0}.midi-btn[disabled]{opacity:.45;cursor:default;transform:none}
+    .midi-transport-main{display:flex;gap:7px;align-items:center;padding:4px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.08)}.midi-play{min-width:82px}.midi-skip{min-width:38px;text-align:center;padding-inline:8px}.midi-mini{font-size:11px;padding:6px 9px;border-radius:10px}.midi-badge{font-size:12px;color:#9fb0a8}
+    .midi-range{appearance:none;-webkit-appearance:none;width:min(320px,36vw);height:6px;border-radius:999px;background:rgba(255,255,255,.12);outline:none}.midi-range::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#59e8a9;box-shadow:0 0 0 4px rgba(89,232,169,.12);cursor:pointer}.midi-range::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#59e8a9;border:none;cursor:pointer}
+    .midi-select,.midi-volume{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#eaf5ef;border-radius:10px;padding:8px 10px;font:inherit;font-size:12px;font-weight:700}.midi-select option{color:#07110d}.midi-volume{width:105px;padding:0;height:6px;border:none;background:rgba(255,255,255,.12)}
+    .midi-track-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.07)}.midi-track-head h4{margin:0;font-size:15px}.midi-track-head span{font-size:11px;color:#9fb0a8}.midi-track-list{display:flex;flex-direction:column;max-height:560px;overflow:auto}
+    .midi-track-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:start;padding:11px 14px;border-bottom:1px solid rgba(255,255,255,.05)}.midi-track-row:hover{background:rgba(255,255,255,.03)}.midi-color{width:12px;height:12px;margin-top:4px;border-radius:4px;background:var(--track-color)}
+    .midi-track-meta{min-width:0}.midi-track-title{display:flex;align-items:center;gap:7px;font-weight:780;font-size:12px;color:#eaf5ef}.midi-track-icon{font-size:15px}.midi-track-title small{font-size:10px;font-weight:800;color:#07110d;background:var(--track-color);padding:2px 6px;border-radius:999px}.midi-track-sub{font-size:11px;color:#8ea097;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .midi-track-actions{display:flex;align-items:center;gap:5px}.midi-track-toggle{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#d9e6df;border-radius:9px;padding:6px 8px;font:inherit;font-size:11px;font-weight:900;cursor:pointer;min-width:32px}.midi-track-toggle.active-solo{background:#ffd166;color:#1a1403;border-color:#ffd166}.midi-track-toggle.active-mute{background:#ff7aa2;color:#250914;border-color:#ff7aa2}.midi-track-toggle.active-hide{background:#7ab8ff;color:#081521;border-color:#7ab8ff}
+    .midi-track-mix{grid-column:2/4;display:grid;grid-template-columns:minmax(80px,1fr) 58px 82px;gap:8px;align-items:center;margin-top:7px}.midi-track-fader{appearance:none;-webkit-appearance:none;height:5px;border-radius:999px;background:rgba(255,255,255,.12)}.midi-track-fader::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--track-color);cursor:pointer}.midi-track-db{font-size:10px;color:#9fb0a8;text-align:right}.midi-meter{height:6px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.midi-meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,#59e8a9,#ffd166,#ff7aa2);transition:width .08s linear}
+    .midi-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.07)}.midi-stat{border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:11px 10px;background:rgba(255,255,255,.03)}.midi-stat b{display:block;font-size:17px}.midi-stat span{font-size:10px;color:#90a198}
+    .midi-roll-wrap{position:relative;overflow:auto;max-height:560px;background:#07100d}.midi-roll-wrap canvas{display:block}.midi-empty{padding:42px 26px;text-align:center;color:#8fa098}.midi-empty strong{display:block;color:#dce8e2;font-size:16px;margin-bottom:6px}.midi-empty span{font-size:13px;line-height:1.5}.midi-hint{padding:10px 18px 14px;color:#83958c;font-size:11px;line-height:1.5;border-top:1px solid rgba(255,255,255,.06)}.midi-generate-slot{display:flex;align-items:center;justify-content:flex-start;gap:10px;flex-wrap:wrap}.midi-generate-slot>div{min-width:220px}.midi-pill{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.1);font-size:11px;color:#9fb0a8}.midi-pill b{color:#eaf5ef}
+    @media(max-width:1080px){.midi-shell{grid-template-columns:1fr}.midi-side{border-right:none;border-bottom:1px solid rgba(255,255,255,.08)}.midi-track-list{max-height:360px}}@media(max-width:700px){.midi-lab-head{flex-direction:column}.midi-toolbar{align-items:stretch}.midi-toolbar-left,.midi-toolbar-right{width:100%}.midi-range{width:100%}.midi-stats-grid{grid-template-columns:repeat(2,1fr)}}`;
   document.head.appendChild(style);
 
-  function readU32(view, offset) { return view.getUint32(offset, false); }
-  function readU16(view, offset) { return view.getUint16(offset, false); }
-  function readVar(bytes, state) {
-    let value = 0, b, guard = 0;
-    do { b = bytes[state.i++]; value = (value << 7) | (b & 0x7f); guard++; } while ((b & 0x80) && guard < 5 && state.i < bytes.length);
-    return value;
-  }
-  function text(bytes, start, len) {
-    try { return new TextDecoder("utf-8").decode(bytes.slice(start, start + len)).replace(/\0/g, "").trim(); } catch { return ""; }
-  }
+  function $(id){return document.getElementById(id)} function fmtTime(sec){sec=Math.max(0,sec||0);const m=Math.floor(sec/60),s=Math.floor(sec%60);return `${m}:${String(s).padStart(2,"0")}`} function noteName(p){const n=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];return `${n[p%12]}${Math.floor(p/12)-1}`} function isBlack(p){return [1,3,6,8,10].includes(((p%12)+12)%12)} function midiFreq(note){return 440*Math.pow(2,(note-69)/12)} function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")} function volumeLabel(v){return v<=0?"-∞":`${(20*Math.log10(v)).toFixed(1)} dB`}
+  function readU32(v,o){return v.getUint32(o,false)} function readU16(v,o){return v.getUint16(o,false)} function readVar(b,s){let value=0,x,g=0;do{x=b[s.i++];value=(value<<7)|(x&0x7f);g++}while((x&0x80)&&g<5&&s.i<b.length);return value} function readText(b,s,l){try{return new TextDecoder("utf-8").decode(b.slice(s,s+l)).replace(/\0/g,"").trim()}catch{return""}}
+  function parseMidi(buffer){const bytes=new Uint8Array(buffer),view=new DataView(buffer);if(readText(bytes,0,4)!=="MThd")throw new Error("O ficheiro recebido não é um MIDI válido.");const headerLen=readU32(view,4),nTracks=readU16(view,10),division=readU16(view,12);if(division&0x8000)throw new Error("Este MIDI usa temporização SMPTE, ainda não suportada.");let pos=8+headerLen,maxTick=0;const tempos=[{tick:0,us:500000}],tracks=[];for(let ti=0;ti<nTracks&&pos+8<=bytes.length;ti++){if(readText(bytes,pos,4)!=="MTrk")break;const len=readU32(view,pos+4),end=Math.min(bytes.length,pos+8+len),s={i:pos+8},active=new Map(),notes=[];let tick=0,running=0,name="",instrument="",program=null;while(s.i<end){tick+=readVar(bytes,s);maxTick=Math.max(maxTick,tick);let status=bytes[s.i++];if(status<0x80){s.i--;status=running}else if(status<0xf0)running=status;if(status===0xff){const type=bytes[s.i++],l=readVar(bytes,s),start=s.i;if(type===0x03)name=readText(bytes,start,l)||name;if(type===0x04)instrument=readText(bytes,start,l)||instrument;if(type===0x51&&l===3)tempos.push({tick,us:(bytes[start]<<16)|(bytes[start+1]<<8)|bytes[start+2]});s.i+=l;continue}if(status===0xf0||status===0xf7){s.i+=readVar(bytes,s);continue}const type=status&0xf0,ch=status&0x0f;if(type===0xc0||type===0xd0){const a=bytes[s.i++];if(type===0xc0&&program===null)program=a;continue}const a=bytes[s.i++],bb=bytes[s.i++];if(type===0x90&&bb>0){const key=`${ch}:${a}`,stack=active.get(key)||[];stack.push({tick,velocity:bb,channel:ch,pitch:a});active.set(key,stack)}else if(type===0x80||(type===0x90&&bb===0)){const key=`${ch}:${a}`,stack=active.get(key);if(stack&&stack.length){const on=stack.shift();notes.push({...on,endTick:Math.max(on.tick+1,tick)})}}}for(const stack of active.values())for(const on of stack)notes.push({...on,endTick:Math.max(on.tick+1,maxTick)});if(notes.length)tracks.push({index:ti,name,instrument,program,notes});pos=end}tempos.sort((a,b)=>a.tick-b.tick);const compact=[];for(const t of tempos){if(compact.length&&compact[compact.length-1].tick===t.tick)compact[compact.length-1]=t;else compact.push(t)}let sec=0,lastTick=0,us=500000;for(const t of compact){sec+=((t.tick-lastTick)*us)/division/1e6;t.sec=sec;lastTick=t.tick;us=t.us}function tickToSec(tick){let lo=0,hi=compact.length-1,idx=0;while(lo<=hi){const mid=(lo+hi)>>1;if(compact[mid].tick<=tick){idx=mid;lo=mid+1}else hi=mid-1}const t=compact[idx];return t.sec+((tick-t.tick)*t.us)/division/1e6}let count=0,minPitch=127,maxPitch=0,duration=0;tracks.forEach((track,idx)=>{const percussion=track.notes.some(n=>n.channel===9);track.color=COLORS[idx%COLORS.length];track.family=percussion?"Percussão":(track.program!==null?(GM_FAMILIES[Math.floor(track.program/8)]||"Instrumento"):"Instrumento");track.icon=ICONS[track.family]||"🎼";track.label=track.name||track.instrument||(percussion?`Bateria / Percussão ${idx+1}`:`${track.family} · Pista ${idx+1}`);track.notes=track.notes.map(n=>{const start=tickToSec(n.tick),end=tickToSec(n.endTick);count++;minPitch=Math.min(minPitch,n.pitch);maxPitch=Math.max(maxPitch,n.pitch);duration=Math.max(duration,end);return{...n,start,end}})});return{tracks,count,duration,minPitch:count?minPitch:48,maxPitch:count?maxPitch:72,bpm:60000000/(compact[0]?.us||500000)}}
 
-  function parseMidi(buffer) {
-    const bytes = new Uint8Array(buffer), view = new DataView(buffer);
-    if (text(bytes, 0, 4) !== "MThd") throw new Error("O ficheiro recebido não é um MIDI válido.");
-    const headerLen = readU32(view, 4), format = readU16(view, 8), nTracks = readU16(view, 10), division = readU16(view, 12);
-    if (division & 0x8000) throw new Error("Este MIDI usa temporização SMPTE, ainda não suportada na visualização.");
-    let pos = 8 + headerLen;
-    const tracks = [], tempos = [{ tick: 0, us: 500000 }];
-    let maxTick = 0;
-
-    for (let ti = 0; ti < nTracks && pos + 8 <= bytes.length; ti++) {
-      if (text(bytes, pos, 4) !== "MTrk") break;
-      const len = readU32(view, pos + 4), end = Math.min(bytes.length, pos + 8 + len);
-      const s = { i: pos + 8 }, active = new Map(), notes = [];
-      let tick = 0, running = 0, name = "", instrument = "", program = null;
-      while (s.i < end) {
-        tick += readVar(bytes, s); maxTick = Math.max(maxTick, tick);
-        let status = bytes[s.i++];
-        if (status < 0x80) { s.i--; status = running; } else if (status < 0xf0) running = status;
-        if (status === 0xff) {
-          const type = bytes[s.i++], l = readVar(bytes, s), start = s.i;
-          if (type === 0x03) name = text(bytes, start, l) || name;
-          if (type === 0x04) instrument = text(bytes, start, l) || instrument;
-          if (type === 0x51 && l === 3) tempos.push({ tick, us: (bytes[start] << 16) | (bytes[start + 1] << 8) | bytes[start + 2] });
-          s.i += l; continue;
-        }
-        if (status === 0xf0 || status === 0xf7) { const l = readVar(bytes, s); s.i += l; continue; }
-        const type = status & 0xf0, ch = status & 0x0f;
-        if (type === 0xc0 || type === 0xd0) {
-          const a = bytes[s.i++]; if (type === 0xc0 && program === null) program = a; continue;
-        }
-        const a = bytes[s.i++], b = bytes[s.i++];
-        if (type === 0x90 && b > 0) {
-          const key = `${ch}:${a}`; const stack = active.get(key) || []; stack.push({ tick, velocity: b, channel: ch, pitch: a }); active.set(key, stack);
-        } else if (type === 0x80 || (type === 0x90 && b === 0)) {
-          const key = `${ch}:${a}`, stack = active.get(key); if (stack && stack.length) { const on = stack.shift(); notes.push({ ...on, endTick: Math.max(on.tick + 1, tick) }); }
-        }
-      }
-      for (const stack of active.values()) for (const on of stack) notes.push({ ...on, endTick: Math.max(on.tick + 1, maxTick) });
-      if (notes.length) tracks.push({ index: ti, name, instrument, program, notes });
-      pos = end;
-    }
-
-    tempos.sort((a,b) => a.tick - b.tick);
-    const dedup = [];
-    for (const t of tempos) { if (dedup.length && dedup[dedup.length - 1].tick === t.tick) dedup[dedup.length - 1] = t; else dedup.push(t); }
-    let sec = 0, lastTick = 0, us = 500000;
-    for (const t of dedup) { sec += ((t.tick - lastTick) * us) / division / 1e6; t.sec = sec; lastTick = t.tick; us = t.us; }
-    function tickToSec(tick) {
-      let lo = 0, hi = dedup.length - 1, idx = 0;
-      while (lo <= hi) { const mid = (lo + hi) >> 1; if (dedup[mid].tick <= tick) { idx = mid; lo = mid + 1; } else hi = mid - 1; }
-      const t = dedup[idx]; return t.sec + ((tick - t.tick) * t.us) / division / 1e6;
-    }
-    let count = 0, minPitch = 127, maxPitch = 0, duration = 0;
-    tracks.forEach((track, idx) => {
-      track.color = COLORS[idx % COLORS.length];
-      track.label = track.name || track.instrument || (track.notes.some(n => n.channel === 9) ? "Bateria / Percussão" : track.program !== null ? `${GM_FAMILIES[Math.floor(track.program / 8)] || "Instrumento"} · Pista ${idx + 1}` : `Pista ${idx + 1}`);
-      track.notes = track.notes.map(n => {
-        const start = tickToSec(n.tick), end = tickToSec(n.endTick); count++; minPitch = Math.min(minPitch, n.pitch); maxPitch = Math.max(maxPitch, n.pitch); duration = Math.max(duration, end); return { ...n, start, end };
-      });
-    });
-    return { format, division, tracks, count, minPitch: count ? minPitch : 48, maxPitch: count ? maxPitch : 72, duration };
-  }
-
-  function noteName(pitch) { const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]; return `${names[pitch % 12]}${Math.floor(pitch / 12) - 1}`; }
-  function black(pitch) { return [1,3,6,8,10].includes(((pitch % 12) + 12) % 12); }
-
-  function ensurePanel() {
-    if (document.getElementById("midiLab")) return document.getElementById("midiLab");
-    const analysisCard = document.getElementById("analysisCard"); if (!analysisCard) return null;
-    const panel = document.createElement("section"); panel.id = "midiLab"; panel.className = "midi-lab";
-    panel.innerHTML = `
-      <div class="midi-lab-head">
-        <div><span class="midi-kicker">MUSCRIPTOR · MIDI</span><h3>Visualização gráfica da transcrição</h3><p>Depois de gerar o MIDI, as notas aparecem aqui em formato piano roll, separadas por pista/instrumento.</p></div>
-        <span id="midiVisualState" class="midi-state"><i></i><span>À espera de MIDI</span></span>
-      </div>
-      <div class="midi-actions">
-        <div class="midi-actions-left"><span id="midiStats" class="midi-stats">Gera um MIDI para abrir a visualização.</span></div>
-        <div class="midi-actions-right"><button id="midiZoomOut" class="midi-tool" disabled>− Zoom</button><button id="midiZoomIn" class="midi-tool" disabled>+ Zoom</button><button id="midiDownloadAgain" class="midi-tool primary" disabled>Descarregar MIDI</button></div>
-      </div>
-      <div id="midiLegend" class="midi-legend" hidden></div>
-      <div id="midiRollWrap" class="midi-roll-wrap"><div class="midi-empty"><strong>A visualização MIDI aparecerá aqui</strong><span>Escolhe a música e usa “Gerar MIDI com IA”.</span></div></div>
-      <div class="midi-hint">Cada cor representa uma pista. Clica no nome de uma pista para a ocultar/mostrar. Usa o zoom para ampliar a linha temporal.</div>`;
-    const action = analysisCard.querySelector(".analysis-action");
-    action?.insertAdjacentElement("afterend", panel);
-
-    // Move the existing MuScriptor action into the graphical MIDI card.
-    setTimeout(() => {
-      const button = document.getElementById("muscriptorMidi");
-      if (button && !panel.contains(button)) {
-        const slot = document.createElement("div"); slot.className = "midi-generate-slot";
-        const parent = button.parentElement; if (parent) slot.appendChild(parent);
-        panel.querySelector(".midi-actions-left")?.appendChild(slot);
-      }
-    }, 0);
-
-    document.getElementById("midiZoomOut").onclick = () => { pxPerSecond = Math.max(16, pxPerSecond / 1.35); draw(); };
-    document.getElementById("midiZoomIn").onclick = () => { pxPerSecond = Math.min(220, pxPerSecond * 1.35); draw(); };
-    document.getElementById("midiDownloadAgain").onclick = () => { if (!blobUrl) return; const a = document.createElement("a"); a.href = blobUrl; a.download = current?.filename || "MuScriptor_transcricao.mid"; document.body.appendChild(a); a.click(); a.remove(); };
-    return panel;
-  }
-
-  function renderLegend() {
-    const legend = document.getElementById("midiLegend"); if (!legend || !current) return;
-    legend.hidden = false; legend.innerHTML = "";
-    current.tracks.forEach((track, idx) => {
-      const b = document.createElement("button"); b.type = "button"; b.className = "midi-track-chip" + (hiddenTracks.has(idx) ? " off" : ""); b.style.setProperty("--track-color", track.color);
-      b.innerHTML = `<i></i><span>${track.label.replace(/[<&]/g, m => m === "<" ? "&lt;" : "&amp;")}</span><b>${track.notes.length}</b>`;
-      b.onclick = () => { hiddenTracks.has(idx) ? hiddenTracks.delete(idx) : hiddenTracks.add(idx); renderLegend(); draw(); };
-      legend.appendChild(b);
-    });
-  }
-
-  function draw() {
-    const wrap = document.getElementById("midiRollWrap"); if (!wrap || !current) return;
-    const minPitch = Math.max(21, Math.min(current.minPitch - 2, current.maxPitch - 23));
-    const maxPitch = Math.min(108, Math.max(current.maxPitch + 2, minPitch + 23));
-    const pitchCount = maxPitch - minPitch + 1;
-    const rowH = 12, keyW = 64, topH = 28;
-    const width = Math.max(920, Math.min(26000, keyW + current.duration * pxPerSecond + 50));
-    const height = topH + pitchCount * rowH;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const canvas = document.createElement("canvas"); canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr); canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
-    const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr); ctx.font = "10px system-ui, sans-serif";
-
-    ctx.fillStyle = "#07100d"; ctx.fillRect(0,0,width,height);
-    for (let p = minPitch; p <= maxPitch; p++) {
-      const y = topH + (maxPitch - p) * rowH;
-      ctx.fillStyle = black(p) ? "rgba(0,0,0,.20)" : (p % 12 === 0 ? "rgba(255,255,255,.035)" : "rgba(255,255,255,.014)"); ctx.fillRect(keyW,y,width-keyW,rowH);
-      ctx.strokeStyle = "rgba(255,255,255,.035)"; ctx.beginPath(); ctx.moveTo(keyW,y+.5); ctx.lineTo(width,y+.5); ctx.stroke();
-    }
-    const secStep = pxPerSecond >= 90 ? 1 : pxPerSecond >= 38 ? 2 : pxPerSecond >= 22 ? 5 : 10;
-    for (let s = 0; s <= current.duration + secStep; s += secStep) {
-      const x = keyW + s * pxPerSecond; ctx.strokeStyle = s % (secStep * 5) === 0 ? "rgba(255,255,255,.12)" : "rgba(255,255,255,.055)"; ctx.beginPath(); ctx.moveTo(x,topH); ctx.lineTo(x,height); ctx.stroke(); ctx.fillStyle = "#80938a"; ctx.fillText(`${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,"0")}`, x+4, 18);
-    }
-    current.tracks.forEach((track, idx) => { if (hiddenTracks.has(idx)) return; ctx.fillStyle = track.color; for (const n of track.notes) { if (n.pitch < minPitch || n.pitch > maxPitch) continue; const x = keyW + n.start * pxPerSecond, y = topH + (maxPitch - n.pitch) * rowH + 1.5, w = Math.max(2.5,(n.end-n.start)*pxPerSecond-1), h = rowH-3; ctx.globalAlpha = .38 + .62*(n.velocity/127); ctx.fillRect(x,y,w,h); } ctx.globalAlpha = 1; });
-
-    ctx.fillStyle = "#0a1511"; ctx.fillRect(0,topH,keyW,height-topH); ctx.strokeStyle = "rgba(255,255,255,.13)"; ctx.beginPath(); ctx.moveTo(keyW-.5,topH); ctx.lineTo(keyW-.5,height); ctx.stroke();
-    for (let p = minPitch; p <= maxPitch; p++) { const y = topH + (maxPitch - p) * rowH; ctx.fillStyle = black(p) ? "#17201c" : "#dfe8e3"; const kw = black(p) ? keyW*.68 : keyW; ctx.fillRect(0,y,kw,rowH-1); if (p % 12 === 0 || pitchCount <= 32) { ctx.fillStyle = black(p) ? "#dfe8e3" : "#18201d"; ctx.fillText(noteName(p), 5, y+9); } }
-    wrap.replaceChildren(canvas);
-  }
-
-  async function showMidi(blob, filename) {
-    ensurePanel();
-    try {
-      const parsed = parseMidi(await blob.arrayBuffer()); parsed.filename = filename; current = parsed; hiddenTracks = new Set();
-      if (blobUrl) URL.revokeObjectURL(blobUrl); blobUrl = URL.createObjectURL(blob);
-      const state = document.getElementById("midiVisualState"); state.className = "midi-state ready"; state.querySelector("span").textContent = "MIDI pronto";
-      document.getElementById("midiStats").textContent = `${parsed.count} notas · ${parsed.tracks.length} pista${parsed.tracks.length === 1 ? "" : "s"} · ${Math.floor(parsed.duration/60)}:${String(Math.round(parsed.duration%60)).padStart(2,"0")}`;
-      ["midiZoomOut","midiZoomIn","midiDownloadAgain"].forEach(id => document.getElementById(id).disabled = false);
-      renderLegend(); draw();
-      document.getElementById("midiLab")?.scrollIntoView({behavior:"smooth",block:"start"});
-    } catch (error) {
-      const state = document.getElementById("midiVisualState"); state.querySelector("span").textContent = "MIDI criado · visualização indisponível";
-      const wrap = document.getElementById("midiRollWrap"); wrap.innerHTML = `<div class="midi-empty"><strong>O MIDI foi criado normalmente</strong><span>${String(error.message || error)}</span></div>`;
-    }
-  }
-
-  ensurePanel();
-
-  // Observe successful Score Studio -> MuScriptor MIDI requests without changing the existing workflow.
-  const nativeFetch = window.fetch.bind(window);
-  window.fetch = async function(input, init) {
-    const response = await nativeFetch(input, init);
-    try {
-      const url = typeof input === "string" ? input : input?.url || "";
-      if (url.includes("/api/muscriptor/midi") && response.ok) {
-        const clone = response.clone();
-        const disposition = clone.headers.get("content-disposition") || "";
-        const match = disposition.match(/filename="?([^";]+)"?/i);
-        const filename = match?.[1] || "MuScriptor_transcricao.mid";
-        clone.blob().then(blob => showMidi(blob, filename)).catch(() => undefined);
-      }
-    } catch {}
-    return response;
-  };
+  function ensurePanel(){if($("midiLab"))return $("midiLab");const analysisCard=$("analysisCard");if(!analysisCard)return null;const panel=document.createElement("section");panel.id="midiLab";panel.className="midi-lab";panel.innerHTML=`<div class="midi-lab-head"><div><span class="midi-kicker">MUSCRIPTOR · MIDI STUDIO</span><h3>Editor e pré-escuta MIDI</h3><p>Piano roll, solo, mute, mesa de mistura, metrónomo e transporte numa única área.</p></div><span id="midiVisualState" class="midi-state"><i></i><span>À espera de MIDI</span></span></div><div class="midi-shell"><aside class="midi-side"><div class="midi-track-head"><div><h4>Pistas MIDI</h4><span id="midiTrackSummary">Nenhum ficheiro carregado</span></div><button id="midiResetMix" class="midi-btn midi-mini ghost" disabled>Limpar mix</button></div><div class="midi-stats-grid"><div class="midi-stat"><b id="midiStatTracks">0</b><span>Pistas</span></div><div class="midi-stat"><b id="midiStatNotes">0</b><span>Notas</span></div><div class="midi-stat"><b id="midiStatDur">0:00</b><span>Duração</span></div><div class="midi-stat"><b id="midiStatBpm">--</b><span>BPM MIDI</span></div></div><div id="midiGenerateArea" style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.07)"></div><div id="midiTrackList" class="midi-track-list"><div class="midi-empty"><strong>Ainda sem pistas</strong><span>Usa “Gerar MIDI com IA” para preencher esta área.</span></div></div></aside><div class="midi-main"><div class="midi-toolbar"><div class="midi-toolbar-left"><div class="midi-transport-main"><button id="midiBack" class="midi-btn midi-skip" disabled>−5</button><button id="midiPlay" class="midi-btn primary midi-play" disabled>▶ Play</button><button id="midiStop" class="midi-btn" disabled>■ Stop</button><button id="midiForward" class="midi-btn midi-skip" disabled>+5</button></div><button id="midiLoop" class="midi-btn" disabled>↻ Loop</button><button id="midiMetronome" class="midi-btn" disabled>♩ Metrónomo</button><span class="midi-pill"><span>Posição</span><b id="midiTime">0:00 / 0:00</b></span></div><div class="midi-toolbar-right"><input id="midiSeek" class="midi-range" type="range" min="0" max="1000" value="0" disabled><select id="midiSpeed" class="midi-select" disabled><option value=".75">0.75×</option><option value="1" selected>1.00×</option><option value="1.25">1.25×</option><option value="1.5">1.50×</option></select><span class="midi-badge">Master</span><input id="midiVolume" class="midi-volume" type="range" min="0" max="1" step=".01" value=".72" disabled><button id="midiZoomOut" class="midi-btn" disabled>− Zoom</button><button id="midiZoomIn" class="midi-btn" disabled>+ Zoom</button><button id="midiDownloadAgain" class="midi-btn" disabled>Descarregar MIDI</button></div></div><div id="midiRollWrap" class="midi-roll-wrap"><div class="midi-empty"><strong>A visualização MIDI aparecerá aqui</strong><span>Quando o MuScriptor terminar, vais ver as notas e controlar as pistas como numa pequena workstation.</span></div></div><div class="midi-hint">S = Solo · M = Mute · 👁 = mostrar/ocultar. O medidor mostra atividade da pista durante a pré-escuta. O Metrónomo usa o BPM do MIDI.</div></div></div>`;const action=analysisCard.querySelector(".analysis-action");action?.insertAdjacentElement("afterend",panel);setTimeout(()=>{const button=$("muscriptorMidi");if(button&&!$("midiGenerateArea").contains(button.parentElement)){const parent=button.parentElement,slot=document.createElement("div");slot.className="midi-generate-slot";slot.appendChild(parent);$("midiGenerateArea").replaceChildren(slot)}},0);$("midiZoomOut").onclick=()=>{state.pxPerSecond=Math.max(18,state.pxPerSecond/1.35);draw()};$("midiZoomIn").onclick=()=>{state.pxPerSecond=Math.min(260,state.pxPerSecond*1.35);draw()};$("midiDownloadAgain").onclick=downloadMidi;$("midiPlay").onclick=togglePlay;$("midiStop").onclick=()=>stopPlayback(true);$("midiBack").onclick=()=>seekBy(-5);$("midiForward").onclick=()=>seekBy(5);$("midiLoop").onclick=()=>{state.loop=!state.loop;$("midiLoop").classList.toggle("active",state.loop)};$("midiMetronome").onclick=()=>{state.metronome=!state.metronome;$("midiMetronome").classList.toggle("active",state.metronome);if(state.isPlaying)restartPlaybackFrom(state.currentSec)};$("midiSpeed").onchange=()=>{state.speed=Number($("midiSpeed").value)||1;if(state.isPlaying)restartPlaybackFrom(state.currentSec)};$("midiVolume").oninput=()=>{if(state.masterGain)state.masterGain.gain.value=Number($("midiVolume").value)};$("midiSeek").oninput=()=>{if(!state.midi)return;state.currentSec=state.midi.duration*(Number($("midiSeek").value)/1000);updateTime();draw()};$("midiSeek").onchange=()=>{if(!state.midi)return;const t=state.midi.duration*(Number($("midiSeek").value)/1000);if(state.isPlaying)restartPlaybackFrom(t);else{state.currentSec=t;updateTime();draw()}};$("midiResetMix").onclick=()=>{state.hiddenTracks.clear();state.mutedTracks.clear();state.soloTracks.clear();state.trackVolumes=state.midi?state.midi.tracks.map(()=>1):[];updateTrackList();applyTrackAudio();draw()};return panel}
+  function setReady(ready){["midiPlay","midiStop","midiBack","midiForward","midiLoop","midiMetronome","midiSeek","midiSpeed","midiVolume","midiZoomOut","midiZoomIn","midiDownloadAgain","midiResetMix"].forEach(id=>{const el=$(id);if(el)el.disabled=!ready})} function setStateLabel(text,ready=false){const el=$("midiVisualState");if(!el)return;el.className="midi-state"+(ready?" ready":"");el.querySelector("span").textContent=text} function updateStats(){if(!state.midi)return;$("midiStatTracks").textContent=state.midi.tracks.length;$("midiStatNotes").textContent=state.midi.count;$("midiStatDur").textContent=fmtTime(state.midi.duration);$("midiStatBpm").textContent=Math.round(state.midi.bpm||120);$("midiTrackSummary").textContent=`${state.midi.tracks.length} pistas · ${state.midi.count} notas`} function updateTime(){if(!state.midi)return;$("midiTime").textContent=`${fmtTime(state.currentSec)} / ${fmtTime(state.midi.duration)}`;$("midiSeek").value=Math.round((state.currentSec/Math.max(state.midi.duration,.001))*1000);$("midiPlay").textContent=state.isPlaying?"❚❚ Pause":"▶ Play"}
+  function toggle(setRef,idx){if(setRef.has(idx))setRef.delete(idx);else setRef.add(idx);updateTrackList();applyTrackAudio()} function updateTrackList(){const list=$("midiTrackList");if(!list)return;if(!state.midi){list.innerHTML=`<div class="midi-empty"><strong>Ainda sem pistas</strong><span>Usa “Gerar MIDI com IA” para preencher esta área.</span></div>`;return}list.innerHTML="";state.midi.tracks.forEach((track,idx)=>{const row=document.createElement("div");row.className="midi-track-row";row.style.setProperty("--track-color",track.color);const vol=state.trackVolumes[idx]??1;row.innerHTML=`<span class="midi-color"></span><div class="midi-track-meta"><div class="midi-track-title"><span class="midi-track-icon">${track.icon}</span>${esc(track.label)} <small>${track.notes.length}</small></div><div class="midi-track-sub">${esc(track.family)} · ${esc(track.instrument||track.name||`Pista ${idx+1}`)}</div></div><div class="midi-track-actions"><button class="midi-track-toggle ${state.soloTracks.has(idx)?"active-solo":""}" data-solo="${idx}">S</button><button class="midi-track-toggle ${state.mutedTracks.has(idx)?"active-mute":""}" data-mute="${idx}">M</button><button class="midi-track-toggle ${state.hiddenTracks.has(idx)?"active-hide":""}" data-hide="${idx}">👁</button></div><div class="midi-track-mix"><input class="midi-track-fader" data-vol="${idx}" type="range" min="0" max="1.25" step=".01" value="${vol}"><span class="midi-track-db" data-db="${idx}">${volumeLabel(vol)}</span><span class="midi-meter"><i data-meter="${idx}"></i></span></div>`;list.appendChild(row)});list.querySelectorAll("[data-solo]").forEach(b=>b.onclick=()=>toggle(state.soloTracks,+b.dataset.solo));list.querySelectorAll("[data-mute]").forEach(b=>b.onclick=()=>toggle(state.mutedTracks,+b.dataset.mute));list.querySelectorAll("[data-hide]").forEach(b=>b.onclick=()=>{const i=+b.dataset.hide;if(state.hiddenTracks.has(i))state.hiddenTracks.delete(i);else state.hiddenTracks.add(i);updateTrackList();draw()});list.querySelectorAll("[data-vol]").forEach(r=>r.oninput=()=>{const i=+r.dataset.vol,v=Number(r.value);state.trackVolumes[i]=v;const out=list.querySelector(`[data-db="${i}"]`);if(out)out.textContent=volumeLabel(v);applyTrackAudio()})}
+  function updateMeters(){if(!state.midi)return;state.midi.tracks.forEach((track,idx)=>{const meter=document.querySelector(`[data-meter="${idx}"]`);if(!meter)return;const active=track.notes.some(n=>n.start<=state.currentSec&&n.end>=state.currentSec),audible=trackShouldSound(idx),level=active&&audible?Math.min(100,35+(state.trackVolumes[idx]??1)*50):0;meter.style.width=`${level}%`})}
+  function downloadMidi(){if(!state.blobUrl||!state.midi)return;const a=document.createElement("a");a.href=state.blobUrl;a.download=state.midi.filename||"MuScriptor_transcricao.mid";document.body.appendChild(a);a.click();a.remove()}
+  function draw(){const wrap=$("midiRollWrap");if(!wrap||!state.midi)return;const minPitch=Math.max(21,Math.min(state.midi.minPitch-2,state.midi.maxPitch-23)),maxPitch=Math.min(108,Math.max(state.midi.maxPitch+2,minPitch+23)),pitchCount=maxPitch-minPitch+1,rowH=12,keyW=66,topH=28,width=Math.max(960,Math.min(30000,keyW+state.midi.duration*state.pxPerSecond+60)),height=topH+pitchCount*rowH,dpr=Math.min(window.devicePixelRatio||1,2),canvas=document.createElement("canvas");canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);canvas.style.width=`${width}px`;canvas.style.height=`${height}px`;const ctx=canvas.getContext("2d");ctx.scale(dpr,dpr);ctx.font="10px system-ui,sans-serif";ctx.fillStyle="#07100d";ctx.fillRect(0,0,width,height);for(let p=minPitch;p<=maxPitch;p++){const y=topH+(maxPitch-p)*rowH;ctx.fillStyle=isBlack(p)?"rgba(0,0,0,.20)":(p%12===0?"rgba(255,255,255,.035)":"rgba(255,255,255,.014)");ctx.fillRect(keyW,y,width-keyW,rowH);ctx.strokeStyle="rgba(255,255,255,.035)";ctx.beginPath();ctx.moveTo(keyW,y+.5);ctx.lineTo(width,y+.5);ctx.stroke()}const secStep=state.pxPerSecond>=100?1:state.pxPerSecond>=46?2:state.pxPerSecond>=28?5:10;for(let s=0;s<=state.midi.duration+secStep;s+=secStep){const x=keyW+s*state.pxPerSecond;ctx.strokeStyle=s%(secStep*5)===0?"rgba(255,255,255,.12)":"rgba(255,255,255,.055)";ctx.beginPath();ctx.moveTo(x,topH);ctx.lineTo(x,height);ctx.stroke();ctx.fillStyle="#80938a";ctx.fillText(fmtTime(s),x+4,18)}state.midi.tracks.forEach((track,idx)=>{if(state.hiddenTracks.has(idx))return;ctx.fillStyle=track.color;for(const n of track.notes){if(n.pitch<minPitch||n.pitch>maxPitch)continue;const x=keyW+n.start*state.pxPerSecond,y=topH+(maxPitch-n.pitch)*rowH+1.5,w=Math.max(2.5,(n.end-n.start)*state.pxPerSecond-1),h=rowH-3;ctx.globalAlpha=.38+.62*(n.velocity/127);ctx.fillRect(x,y,w,h)}ctx.globalAlpha=1});ctx.fillStyle="#0a1511";ctx.fillRect(0,topH,keyW,height-topH);ctx.strokeStyle="rgba(255,255,255,.13)";ctx.beginPath();ctx.moveTo(keyW-.5,topH);ctx.lineTo(keyW-.5,height);ctx.stroke();for(let p=minPitch;p<=maxPitch;p++){const y=topH+(maxPitch-p)*rowH;ctx.fillStyle=isBlack(p)?"#17201c":"#dfe8e3";const kw=isBlack(p)?keyW*.68:keyW;ctx.fillRect(0,y,kw,rowH-1);if(p%12===0||pitchCount<=32){ctx.fillStyle=isBlack(p)?"#dfe8e3":"#18201d";ctx.fillText(noteName(p),5,y+9)}}const playX=keyW+state.currentSec*state.pxPerSecond;ctx.strokeStyle="#59e8a9";ctx.lineWidth=1.6;ctx.beginPath();ctx.moveTo(playX,0);ctx.lineTo(playX,height);ctx.stroke();ctx.fillStyle="#59e8a9";ctx.beginPath();ctx.moveTo(playX-6,topH-1);ctx.lineTo(playX+6,topH-1);ctx.lineTo(playX,topH+7);ctx.closePath();ctx.fill();canvas.onclick=e=>{const rect=canvas.getBoundingClientRect(),sec=Math.max(0,Math.min(state.midi.duration,(e.clientX-rect.left-keyW)/state.pxPerSecond));if(state.isPlaying)restartPlaybackFrom(sec);else{state.currentSec=sec;updateTime();updateMeters();draw()}};const oldLeft=wrap.scrollLeft,oldTop=wrap.scrollTop;wrap.replaceChildren(canvas);wrap.scrollLeft=oldLeft;wrap.scrollTop=oldTop}
+  function trackShouldSound(idx){if(state.mutedTracks.has(idx))return false;if(state.soloTracks.size>0)return state.soloTracks.has(idx);return true} function ensureAudio(){if(!state.audioCtx){const AC=window.AudioContext||window.webkitAudioContext;state.audioCtx=new AC();state.masterGain=state.audioCtx.createGain();state.masterGain.gain.value=Number($("midiVolume").value||.72);state.masterGain.connect(state.audioCtx.destination)}if(state.audioCtx.state==="suspended")state.audioCtx.resume()} function waveform(track){const f=(track.family||"").toLowerCase();if(f.includes("baixo"))return"square";if(f.includes("sint"))return"sawtooth";if(f.includes("guit"))return"triangle";if(f.includes("met"))return"sawtooth";return"sine"} function clearVoices(){for(const v of [...state.scheduledVoices,...state.scheduledClicks]){try{v.osc.stop()}catch{}try{v.osc.disconnect()}catch{}try{v.gain.disconnect()}catch{}}state.scheduledVoices=[];state.scheduledClicks=[]} function applyTrackAudio(){state.trackGains.forEach((g,idx)=>{const target=trackShouldSound(idx)?(state.trackVolumes[idx]??1):0;try{g.gain.setTargetAtTime(target,state.audioCtx?.currentTime||0,.01)}catch{g.gain.value=target}})}
+  function scheduleClick(time,accent=false){const osc=state.audioCtx.createOscillator(),gain=state.audioCtx.createGain();osc.type="square";osc.frequency.value=accent?1500:1000;gain.gain.value=0;osc.connect(gain);gain.connect(state.masterGain);gain.gain.setValueAtTime(0,time);gain.gain.linearRampToValueAtTime(accent?.13:.08,time+.005);gain.gain.exponentialRampToValueAtTime(.0001,time+.045);osc.start(time);osc.stop(time+.05);state.scheduledClicks.push({osc,gain})}
+  function schedulePlayback(fromSec){ensureAudio();clearVoices();state.trackGains=state.midi.tracks.map(()=>{const g=state.audioCtx.createGain();g.gain.value=1;g.connect(state.masterGain);return g});applyTrackAudio();const now=state.audioCtx.currentTime;state.playbackStartSec=fromSec;state.playbackStartAudioTime=now+.04;const speed=state.speed;state.midi.tracks.forEach((track,idx)=>{const tg=state.trackGains[idx],type=waveform(track);for(const note of track.notes){if(note.end<=fromSec)continue;const startOffset=Math.max(0,note.start-fromSec)/speed,dur=Math.max(.04,(note.end-Math.max(note.start,fromSec))/speed),osc=state.audioCtx.createOscillator(),gain=state.audioCtx.createGain();osc.type=note.channel===9?"square":type;osc.frequency.value=note.channel===9?130+(note.pitch*3):midiFreq(note.pitch);gain.gain.value=0;osc.connect(gain);gain.connect(tg);const st=state.playbackStartAudioTime+startOffset,en=st+dur,peak=Math.min(.20,.03+(note.velocity/127)*.11);gain.gain.setValueAtTime(0,Math.max(now,st-.001));gain.gain.linearRampToValueAtTime(peak,st+.01);gain.gain.linearRampToValueAtTime(Math.max(.025,peak*.7),Math.max(st+.015,en-.04));gain.gain.linearRampToValueAtTime(.0001,en);try{osc.start(st);osc.stop(en+.02)}catch{}state.scheduledVoices.push({osc,gain})}});if(state.metronome){const beat=60/Math.max(30,state.midi.bpm||120),first=Math.ceil(fromSec/beat)*beat;let index=Math.round(first/beat);for(let t=first;t<=state.midi.duration;t+=beat,index++){const when=state.playbackStartAudioTime+(t-fromSec)/speed;scheduleClick(when,index%4===0)}}}
+  function loopFrame(){if(!state.isPlaying||!state.audioCtx||!state.midi)return;state.currentSec=state.playbackStartSec+(state.audioCtx.currentTime-state.playbackStartAudioTime)*state.speed;if(state.currentSec>=state.midi.duration){if(state.loop){restartPlaybackFrom(0);return}stopPlayback(true);return}updateTime();updateMeters();draw();state.raf=requestAnimationFrame(loopFrame)} function startPlayback(from=state.currentSec){if(!state.midi)return;ensureAudio();schedulePlayback(from);state.currentSec=from;state.isPlaying=true;updateTime();draw();cancelAnimationFrame(state.raf);state.raf=requestAnimationFrame(loopFrame)} function pausePlayback(){cancelAnimationFrame(state.raf);if(state.audioCtx&&state.midi)state.currentSec=Math.max(0,Math.min(state.midi.duration,state.playbackStartSec+(state.audioCtx.currentTime-state.playbackStartAudioTime)*state.speed));clearVoices();state.isPlaying=false;updateTime();updateMeters();draw()} function stopPlayback(reset=true){cancelAnimationFrame(state.raf);clearVoices();state.isPlaying=false;if(reset)state.currentSec=0;updateTime();updateMeters();draw()} function togglePlay(){if(!state.midi)return;if(state.isPlaying)pausePlayback();else startPlayback(state.currentSec)} function restartPlaybackFrom(sec){clearVoices();state.isPlaying=false;startPlayback(Math.max(0,Math.min(state.midi.duration,sec)))} function seekBy(delta){if(!state.midi)return;const t=Math.max(0,Math.min(state.midi.duration,state.currentSec+delta));if(state.isPlaying)restartPlaybackFrom(t);else{state.currentSec=t;updateTime();updateMeters();draw()}}
+  async function showMidi(blob,filename){ensurePanel();try{const parsed=parseMidi(await blob.arrayBuffer());parsed.filename=filename;state.midi=parsed;state.currentSec=0;state.hiddenTracks.clear();state.mutedTracks.clear();state.soloTracks.clear();state.trackVolumes=parsed.tracks.map(()=>1);if(state.blobUrl)URL.revokeObjectURL(state.blobUrl);state.blobUrl=URL.createObjectURL(blob);setReady(true);setStateLabel("MIDI pronto",true);updateStats();updateTrackList();updateTime();draw();$("midiLab")?.scrollIntoView({behavior:"smooth",block:"start"})}catch(error){setStateLabel("MIDI criado · visualização indisponível",false);$("midiRollWrap").innerHTML=`<div class="midi-empty"><strong>O MIDI foi criado normalmente</strong><span>${esc(error.message||error)}</span></div>`}}
+  ensurePanel();const nativeFetch=window.fetch.bind(window);window.fetch=async function(input,init){const response=await nativeFetch(input,init);try{const url=typeof input==="string"?input:(input?.url||"");if(url.includes("/api/muscriptor/midi")&&response.ok){const clone=response.clone(),disposition=clone.headers.get("content-disposition")||"",match=disposition.match(/filename="?([^";]+)"?/i),filename=match?.[1]||"MuScriptor_transcricao.mid";clone.blob().then(blob=>showMidi(blob,filename)).catch(()=>undefined)}}catch{}return response};
 })();
