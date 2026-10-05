@@ -168,8 +168,10 @@ def muscriptor_progress(job_id: str):
 async def muscriptor_midi(
     file: UploadFile = File(...),
     job_id: str = Form(""),
+    client_id: str = Form(""),
 ):
     job_id = (job_id or uuid.uuid4().hex).strip()[:120]
+    client_id = (client_id or job_id).strip()[:120]
     _set_progress(
         job_id,
         percent=1,
@@ -228,7 +230,7 @@ async def muscriptor_midi(
             async with client.stream(
                 "POST",
                 f"{WORKER_URL}/transcribe",
-                headers=_worker_headers({"X-Client-ID": job_id}),
+                headers=_worker_headers({"X-Client-ID": client_id}),
                 files=files,
                 data=data,
             ) as response:
@@ -240,6 +242,8 @@ async def muscriptor_midi(
                         detail = payload.get("detail") or payload.get("error") or raw
                     except Exception:
                         pass
+                    if response.status_code == 503 and "server busy" in (detail or "").lower():
+                        detail = "Existe uma transcrição anterior ainda ativa. Aguarda alguns segundos e volta a carregar em Gerar MIDI com IA."
                     _set_progress(job_id, percent=0, stage="error", stage_label="Erro", message=detail or f"HTTP {response.status_code}")
                     return JSONResponse(
                         {"ok": False, "error": detail or f"O MuScriptor respondeu com HTTP {response.status_code}."},
