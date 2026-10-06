@@ -1,4 +1,4 @@
-const CACHE_NAME = "score-studio-pwa-v5-15";
+const CACHE_NAME = "score-studio-pwa-v5-16";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
