@@ -86,10 +86,18 @@ def diatonic_bonus(root, suffix, key):
             9: {"m", "m7"},
             11: {"dim"},
         }
-    return 0.045 if suffix in expected.get(rel, set()) else 0.0
+    return 0.026 if suffix in expected.get(rel, set()) else 0.0
 
 
-def chord_scores(vector, key=None):
+def chord_scores(vector, key=None, bass_vector=None):
+    """
+    Score chord candidates using harmonic chroma plus low-register evidence.
+
+    The older detector sometimes selected attractive-looking but wrong 7th/sus
+    chords from melody notes. This version prefers a simple triad unless the
+    extra chord tone is genuinely present and uses bass energy to stabilise the
+    root without forcing every inversion to root position.
+    """
     vector = np.nan_to_num(np.asarray(vector, dtype=float), nan=0.0)
     total = float(np.sum(np.maximum(vector, 0.0)))
     if total <= 1e-10:
@@ -99,16 +107,60 @@ def chord_scores(vector, key=None):
     l1 = np.maximum(vector, 0.0) / (total + 1e-9)
     scores = CHORD_TEMPLATES @ norm
 
+    bass_l1 = None
+    if bass_vector is not None:
+        bass = np.maximum(np.nan_to_num(np.asarray(bass_vector, dtype=float), nan=0.0), 0.0)
+        bass_total = float(np.sum(bass))
+        if bass_total > 1e-10:
+            bass_l1 = bass / bass_total
+
+    extension_interval = {
+        "7": 10,
+        "maj7": 11,
+        "m7": 10,
+        "sus2": 2,
+        "sus4": 5,
+        "dim": 6,
+    }
+
     for i, (root, suffix, mask, penalty) in enumerate(CHORD_META):
         leakage = float(np.sum(l1[~mask]))
         root_energy = float(l1[root])
-        scores[i] += 0.10 * root_energy
-        scores[i] -= 0.18 * leakage
+
+        scores[i] += 0.095 * root_energy
+        scores[i] -= 0.20 * leakage
         scores[i] -= penalty
+
+        if bass_l1 is not None:
+            root_bass = float(bass_l1[root])
+            third_pc = (root + (3 if suffix.startswith("m") or suffix == "dim" else 4)) % 12
+            fifth_pc = (root + (6 if suffix == "dim" else 7)) % 12
+            chord_bass = root_bass + 0.42 * float(bass_l1[third_pc]) + 0.55 * float(bass_l1[fifth_pc])
+            scores[i] += 0.19 * root_bass + 0.055 * chord_bass
+
+        if suffix in extension_interval:
+            extra_pc = (root + extension_interval[suffix]) % 12
+            extra = float(l1[extra_pc])
+
+            if suffix in {"7", "maj7", "m7"}:
+                if extra < 0.055:
+                    scores[i] -= 0.105
+                elif extra < 0.085:
+                    scores[i] -= 0.045
+
+            elif suffix in {"sus2", "sus4"}:
+                major_third = float(l1[(root + 4) % 12])
+                minor_third = float(l1[(root + 3) % 12])
+                if max(major_third, minor_third) > extra * 0.95:
+                    scores[i] -= 0.075
+
+            elif suffix == "dim" and extra < 0.07:
+                scores[i] -= 0.07
+
         if key:
             scores[i] += diatonic_bonus(root, suffix, key)
-    return scores
 
+    return scores
 
 def smooth_chords(score_rows, transition_penalty=0.085):
     if not score_rows:
@@ -137,6 +189,59 @@ def smooth_chords(score_rows, transition_penalty=0.085):
         path.append(idx)
     path.reverse()
     return [CHORD_NAMES[i] for i in path]
+
+
+def low_register_chroma(y_harm, sr, hop_length, target_frames):
+    """Fold the lower musical register into 12 pitch classes for root support."""
+    try:
+        cqt = np.abs(librosa.cqt(
+            y=y_harm,
+            sr=sr,
+            hop_length=hop_length,
+            fmin=librosa.note_to_hz("C1"),
+            n_bins=48,
+            bins_per_octave=12,
+        ))
+        low = cqt[:30]
+        chroma = np.zeros((12, low.shape[1]), dtype=float)
+        for bin_index in range(low.shape[0]):
+            chroma[bin_index % 12] += low[bin_index]
+        chroma /= np.max(chroma, axis=0, keepdims=True) + 1e-9
+        return chroma[:, :target_frames]
+    except Exception:
+        return np.zeros((12, target_frames), dtype=float)
+
+
+def grouped_bar_rows(chroma, bass_chroma, beat_frames, beat_times, key, beats_per_bar=4):
+    """
+    Build one observation per bar while preserving beat-level evidence.
+    """
+    beat_rows = beat_rows_from_chroma(chroma, beat_frames)
+    bass_beats = beat_rows_from_chroma(bass_chroma, beat_frames)
+
+    if len(beat_rows) < beats_per_bar * 2:
+        return [], [], [], []
+
+    phase = choose_bar_phase(beat_rows, key, beats_per_bar)
+    rows, bass_rows, beat_groups, times = [], [], [], []
+
+    usable = min(len(beat_rows), len(bass_beats) if bass_beats else len(beat_rows))
+
+    for i in range(phase, usable - beats_per_bar + 1, beats_per_bar):
+        group = np.asarray(beat_rows[i:i + beats_per_bar])
+        rows.append(0.74 * np.median(group, axis=0) + 0.26 * np.mean(group, axis=0))
+
+        if bass_beats:
+            bgroup = np.asarray(bass_beats[i:i + beats_per_bar])
+            bass_rows.append(0.60 * np.median(bgroup, axis=0) + 0.40 * np.mean(bgroup, axis=0))
+        else:
+            bass_rows.append(np.zeros(12, dtype=float))
+
+        beat_groups.append(list(group))
+        if i < len(beat_times):
+            times.append(float(beat_times[i]))
+
+    return rows, bass_rows, beat_groups, times
 
 
 def beat_rows_from_chroma(chroma, beat_frames):
@@ -271,6 +376,63 @@ def build_structure(chords, chronological=False):
     return sections
 
 
+def _score_margin(scores):
+    if len(scores) < 2:
+        return 0.0
+    top = np.partition(np.asarray(scores, dtype=float), -2)[-2:]
+    return float(top[-1] - top[-2])
+
+
+def _root_of_chord(name):
+    for note in sorted(NOTE_NAMES, key=len, reverse=True):
+        if name.startswith(note):
+            return note
+    return name
+
+
+def _simple_variant(name):
+    root = _root_of_chord(name)
+    suffix = name[len(root):]
+    if suffix in {"7", "maj7", "sus2", "sus4"}:
+        return root
+    if suffix == "m7":
+        return root + "m"
+    return name
+
+
+def stabilise_chord_sequence(chords, score_rows):
+    """
+    Remove isolated one-bar mistakes and quality flicker.
+    """
+    if not chords:
+        return chords
+
+    result = list(chords)
+    margins = [_score_margin(s) for s in score_rows]
+
+    for i in range(1, len(result) - 1):
+        prev_chord, current, next_chord = result[i - 1], result[i], result[i + 1]
+
+        if prev_chord == next_chord and current != prev_chord and margins[i] < 0.105:
+            result[i] = prev_chord
+            continue
+
+        simple = _simple_variant(current)
+        if simple != current:
+            same_root_neighbour = (
+                _root_of_chord(prev_chord) == _root_of_chord(current)
+                or _root_of_chord(next_chord) == _root_of_chord(current)
+            )
+            if same_root_neighbour and margins[i] < 0.085:
+                result[i] = simple
+
+    for i in range(1, len(result) - 1):
+        if result[i - 1] == result[i + 1] and result[i] != result[i - 1] and margins[i] < 0.075:
+            result[i] = result[i - 1]
+
+    return result
+
+
 def dominant_notes(chroma):
     energy = np.mean(chroma, axis=1)
     if not np.any(np.isfinite(energy)):
@@ -348,12 +510,39 @@ def analyze_audio(path: Path, instrument: str):
     beat_frames = beat_frames[beat_frames < frames]
     beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop).tolist()
 
-    rows, bar_times = bars_from_beats(chroma, beat_frames, beat_times, key, beats_per_bar=4)
+    bass_chroma = low_register_chroma(y_harm, sr, hop, frames)
+    rows, bass_rows, beat_groups, bar_times = grouped_bar_rows(
+        chroma,
+        bass_chroma,
+        beat_frames,
+        beat_times,
+        key,
+        beats_per_bar=4,
+    )
+
     if len(rows) < 4:
         rows, bar_times = uniform_bar_chroma(chroma, duration, tempo)
+        bass_rows = [np.zeros(12, dtype=float) for _ in rows]
+        beat_groups = [[] for _ in rows]
 
-    score_rows = [chord_scores(row, key=key) for row in rows]
-    chords = smooth_chords(score_rows, transition_penalty=0.085)
+    score_rows = []
+    for row, bass_row, beat_group in zip(rows, bass_rows, beat_groups):
+        bar_scores = chord_scores(row, key=key, bass_vector=bass_row)
+
+        if beat_group:
+            beat_scores = [
+                chord_scores(beat, key=key, bass_vector=bass_row)
+                for beat in beat_group
+            ]
+            beat_mean = np.mean(np.asarray(beat_scores), axis=0)
+            combined = 0.67 * bar_scores + 0.33 * beat_mean
+        else:
+            combined = bar_scores
+
+        score_rows.append(combined)
+
+    chords = smooth_chords(score_rows, transition_penalty=0.115)
+    chords = stabilise_chord_sequence(chords, score_rows)
 
     sections = build_structure(chords)
     chronological = build_structure(chords, chronological=True)
@@ -391,6 +580,6 @@ def analyze_audio(path: Path, instrument: str):
         "analysis_signal": signal,
         "bars_analyzed": len(chords),
         "chord_confidence": round(confidence, 4),
-        "analysis_mode": "high_precision_harmonic",
-        "note": "Análise harmónica de alta precisão. A separação harmónica, CQT/CENS e contexto tonal reduzem erros de acordes; confirma apenas casos ambíguos.",
+        "analysis_mode": "precision_plus_bass_consensus",
+        "note": "Precisão+ usa consenso por batida, registo grave para estabilizar a fundamental, preferência por tríades quando extensões são ambíguas e remoção de acordes isolados.",
     }
