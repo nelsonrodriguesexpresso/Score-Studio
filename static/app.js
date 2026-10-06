@@ -29,7 +29,7 @@ document.querySelectorAll(".step").forEach(btn=>btn.onclick=()=>{const target=$(
 
 $("go").onclick=async()=>{if(!selectedFile){setStatus("Escolhe primeiro uma música.","error");return;}$("go").disabled=true;setStatus("A analisar a música e os acordes. Mantém esta página aberta; pode demorar alguns minutos.");startProgress();const fd=new FormData();fd.append("file",selectedFile);fd.append("instrument",$("instrument").value);try{const response=await fetch("/api/analyze",{method:"POST",body:fd});const raw=await response.text();let data;try{data=JSON.parse(raw);}catch{throw new Error(`Resposta inválida do servidor: ${raw.substring(0,160)}`);}if(!response.ok||!data.ok)throw new Error((data.error||"Erro na análise")+(data.detail?` ${data.detail}`:""));analysis=data;populateReview();finishProgress();setStatus("Análise concluída. Revê agora os resultados.","success");$("reviewCard").classList.remove("hidden");$("exportCard").classList.remove("hidden");setActiveStep(2);setTimeout(()=>$("reviewCard").scrollIntoView({behavior:"smooth",block:"start"}),250);}catch(error){failProgress();setStatus(`Erro: ${error.message}`,"error");}finally{$("go").disabled=false;}};
 
-function populateReview(){$("title").value=analysis.title||selectedFile?.name.replace(/\.[^.]+$/,"")||"Música";$("bpmInput").value=analysis.tempo||120;$("keyInput").value=analysis.key||"C";$("meterInput").value=analysis.meter||"4/4";$("durationValue").textContent=formatDuration(analysis.duration||0);$("barsValue").textContent=analysis.bars_analyzed||countBars();$("instrumentValue").textContent=instrumentLabels[analysis.instrument]||"Instrumento";$("signal").textContent=analysis.analysis_signal||"-";$("notes").innerHTML=(analysis.detected_notes||[]).map(n=>`<span>${escapeHtml(n)}</span>`).join("")||"<span>Sem notas estáveis</span>";renderSections();}
+function populateReview(){$("title").value=analysis.title||selectedFile?.name.replace(/\.[^.]+$/,"")||"Música";$("bpmInput").value=analysis.tempo||120;$("keyInput").value=analysis.key||"C";$("meterInput").value=analysis.meter||"4/4";$("durationValue").textContent=formatDuration(analysis.duration||0);$("barsValue").textContent=analysis.bars_analyzed||countBars();$("instrumentValue").textContent=instrumentLabels[analysis.instrument]||"Instrumento";const cev=$("chordEngineValue");if(cev)cev.textContent=analysis.chord_engine||"Análise harmónica";$("signal").textContent=analysis.analysis_signal||"-";$("notes").innerHTML=(analysis.detected_notes||[]).map(n=>`<span>${escapeHtml(n)}</span>`).join("")||"<span>Sem notas estáveis</span>";renderSections();}
 function formatDuration(seconds){const min=Math.floor(seconds/60),sec=Math.round(seconds%60);return `${min}:${String(sec).padStart(2,"0")}`;}
 function countBars(){return (analysis?.sections||[]).reduce((sum,s)=>sum+(s.chords?.length||0),0);}
 function escapeHtml(value){return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
@@ -103,7 +103,7 @@ $("pdfChart").onclick=()=>exportPdf("chart");
 // Load the graphical MIDI piano-roll module after the main interface is ready.
 (() => {
   const script = document.createElement("script");
-  script.src = "/static/midi-visualizer.js?v=5.15.0";
+  script.src = "/static/midi-visualizer.js?v=5.16.0";
   script.defer = true;
   document.body.appendChild(script);
 })();
