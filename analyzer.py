@@ -4,7 +4,7 @@ import librosa
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 MAJOR_PROFILE = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-MINOR_PROFILE = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])\n\n# Optional deep-learning chord engine. It is installed only on the local Score Studio\n# workstation; cloud/fallback deployments continue to use the spectral analyser.\n_LV_CHORDIA_ENSEMBLE = None\n_LV_CHORDIA_ERROR = None
+MINOR_PROFILE = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
 
 CHORD_QUALITIES = {
     "": ([0, 4, 7], [1.00, 0.92, 0.82], 0.000),
@@ -291,131 +291,6 @@ def chord_confidence(score_rows):
     return float(np.median(margins)) if margins else 0.0
 
 
-
-def _normalise_lv_chord(label):
-    """Convert JAMS-style labels from lv-chordia into compact musician-friendly names."""
-    if not label or label == "N":
-        return "N"
-
-    # Preserve inversions while simplifying the main chord quality.
-    bass = ""
-    core = str(label)
-    if "/" in core:
-        core, bass = core.split("/", 1)
-        bass = "/" + bass.split(":", 1)[0]
-
-    if ":" not in core:
-        return core + bass
-
-    root, quality = core.split(":", 1)
-    quality = quality.strip()
-    replacements = {
-        "maj": "",
-        "min": "m",
-        "maj7": "maj7",
-        "min7": "m7",
-        "7": "7",
-        "dim": "dim",
-        "dim7": "dim7",
-        "hdim7": "m7b5",
-        "aug": "aug",
-        "sus2": "sus2",
-        "sus4": "sus4",
-        "maj6": "6",
-        "min6": "m6",
-        "9": "9",
-        "maj9": "maj9",
-        "min9": "m9",
-        "11": "11",
-        "13": "13",
-    }
-    compact = replacements.get(quality)
-    if compact is None:
-        # lv-chordia can emit large-vocabulary labels. Keep useful labels, but
-        # avoid exposing JAMS punctuation that is awkward in the editor.
-        compact = quality.replace("(", "").replace(")", "").replace(",", "")
-        compact = compact.replace("min", "m").replace("maj", "maj")
-    return f"{root}{compact}{bass}"
-
-
-def _load_lv_chordia_ensemble():
-    """Load the five-model chord ensemble once and keep it resident for later songs."""
-    global _LV_CHORDIA_ENSEMBLE, _LV_CHORDIA_ERROR
-    if _LV_CHORDIA_ENSEMBLE is not None:
-        return _LV_CHORDIA_ENSEMBLE
-    if _LV_CHORDIA_ERROR is not None:
-        return None
-
-    try:
-        from lv_chordia.chord_recognition import load_ensemble
-        _LV_CHORDIA_ENSEMBLE = load_ensemble(use_gpu=False)
-        return _LV_CHORDIA_ENSEMBLE
-    except Exception as exc:
-        _LV_CHORDIA_ERROR = f"{type(exc).__name__}: {exc}"
-        return None
-
-
-def deep_chord_segments(path: Path):
-    """Return time-aligned chords from a trained deep-learning ensemble when available."""
-    ensemble = _load_lv_chordia_ensemble()
-    if ensemble is None:
-        return None
-
-    try:
-        from lv_chordia.chord_recognition import recognize_with_ensemble
-        raw = recognize_with_ensemble(
-            ensemble,
-            str(path),
-            chord_dict_name="submission",
-        )
-    except Exception:
-        return None
-
-    segments = []
-    for item in raw or []:
-        try:
-            start = max(0.0, float(item.get("start_time", 0.0)))
-            end = max(start, float(item.get("end_time", start)))
-            chord = _normalise_lv_chord(item.get("chord", "N"))
-        except Exception:
-            continue
-        if end > start:
-            segments.append({"start": start, "end": end, "chord": chord})
-    return segments
-
-
-def chords_from_segments(segments, bar_times, duration, fallback):
-    """Collapse time-aligned ML chords into one musically dominant chord per bar."""
-    if not segments or not bar_times:
-        return fallback
-
-    result = []
-    for i, start in enumerate(bar_times):
-        end = bar_times[i + 1] if i + 1 < len(bar_times) else duration
-        if end <= start:
-            result.append(fallback[i] if i < len(fallback) else "N")
-            continue
-
-        overlap = {}
-        for segment in segments:
-            a = max(float(start), float(segment["start"]))
-            b = min(float(end), float(segment["end"]))
-            if b <= a:
-                continue
-            chord = segment["chord"]
-            overlap[chord] = overlap.get(chord, 0.0) + (b - a)
-
-        # Ignore 'N' if there is a meaningful harmonic candidate in the bar.
-        musical = {k: v for k, v in overlap.items() if k != "N"}
-        pool = musical or overlap
-        if pool:
-            result.append(max(pool, key=pool.get))
-        else:
-            result.append(fallback[i] if i < len(fallback) else "N")
-
-    return result
-
-
 def analyze_audio(path: Path, instrument: str):
     sr_target = 16000
     hop = 512
@@ -478,22 +353,7 @@ def analyze_audio(path: Path, instrument: str):
         rows, bar_times = uniform_bar_chroma(chroma, duration, tempo)
 
     score_rows = [chord_scores(row, key=key) for row in rows]
-    spectral_chords = smooth_chords(score_rows, transition_penalty=0.085)
-
-    # Primary chord engine: a trained five-network ensemble (lv-chordia).
-    # The spectral detector remains as a fallback and fills gaps/silence.
-    ml_segments = deep_chord_segments(path)
-    if ml_segments:
-        chords = chords_from_segments(
-            ml_segments,
-            bar_times,
-            duration,
-            spectral_chords,
-        )
-        chord_engine = "IA profunda · ensemble LV-Chordia"
-    else:
-        chords = spectral_chords
-        chord_engine = "Análise harmónica local (fallback)"
+    chords = smooth_chords(score_rows, transition_penalty=0.085)
 
     sections = build_structure(chords)
     chronological = build_structure(chords, chronological=True)
@@ -531,14 +391,6 @@ def analyze_audio(path: Path, instrument: str):
         "analysis_signal": signal,
         "bars_analyzed": len(chords),
         "chord_confidence": round(confidence, 4),
-        "analysis_mode": "deep_chord_ai" if ml_segments else "high_precision_harmonic",
-        "chord_engine": chord_engine,
-        "deep_chord_segments": len(ml_segments or []),
-        "note": (
-            "Acordes reconhecidos por um ensemble de redes neurais e alinhados ao compasso. "
-            "Casos ambíguos continuam editáveis."
-            if ml_segments
-            else
-            "Motor de IA de acordes indisponível; foi usada a análise harmónica local de alta precisão."
-        ),
+        "analysis_mode": "high_precision_harmonic",
+        "note": "Análise harmónica de alta precisão. A separação harmónica, CQT/CENS e contexto tonal reduzem erros de acordes; confirma apenas casos ambíguos.",
     }
