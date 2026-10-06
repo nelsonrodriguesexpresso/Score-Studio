@@ -103,7 +103,7 @@ $("pdfChart").onclick=()=>exportPdf("chart");
 // Load the graphical MIDI piano-roll module after the main interface is ready.
 (() => {
   const script = document.createElement("script");
-  script.src = "/static/midi-visualizer.js?v=5.11.0";
+  script.src = "/static/midi-visualizer.js?v=5.15.0";
   script.defer = true;
   document.body.appendChild(script);
 })();
